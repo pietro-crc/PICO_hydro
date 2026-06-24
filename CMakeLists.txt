@@ -40,6 +40,7 @@ add_executable(PICO_hydro
         src/app/hydro_controller.cpp
         src/drivers/lcd1602_i2c.cpp
         src/drivers/ws2812_strip.cpp
+        src/sensors/ds18b20_sensor.cpp
         src/sensors/dht_sensor.cpp
         src/sensors/flow_meter.cpp
         src/sensors/level_sensor.cpp

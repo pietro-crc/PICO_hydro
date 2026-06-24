@@ -24,9 +24,41 @@ void LcdCarousel::format_humidity_line(char *line, size_t line_size, const DhtRe
     snprintf(line, line_size, "Umid: %.1f %%", dht.humidity_percent);
 }
 
+void LcdCarousel::format_water_temperature_line(char *line, size_t line_size, const WaterTemperatureReading &water_temperature) {
+    if (!water_temperature.valid) {
+        switch (water_temperature.status) {
+            case WaterTemperatureStatus::not_read:
+                snprintf(line, line_size, "Acqua: attesa");
+                break;
+            case WaterTemperatureStatus::bus_stuck_low:
+                snprintf(line, line_size, "Acqua: DAT LOW");
+                break;
+            case WaterTemperatureStatus::device_missing:
+                snprintf(line, line_size, "Acqua: no pres");
+                break;
+            case WaterTemperatureStatus::conversion_started:
+                snprintf(line, line_size, "Acqua: misura");
+                break;
+            case WaterTemperatureStatus::crc_error:
+                snprintf(line, line_size, "Acqua: CRC err");
+                break;
+            case WaterTemperatureStatus::invalid_data:
+                snprintf(line, line_size, "Acqua: dati err");
+                break;
+            case WaterTemperatureStatus::valid:
+                snprintf(line, line_size, "Acqua: errore");
+                break;
+        }
+        return;
+    }
+
+    snprintf(line, line_size, "Acqua: %.1f C", water_temperature.temperature_c);
+}
+
 void LcdCarousel::show(
     uint8_t page,
     const DhtReading &dht,
+    const WaterTemperatureReading &water_temperature,
     const VemlReading &veml,
     const TdsReading &tds,
     bool level_present,
@@ -44,11 +76,16 @@ void LcdCarousel::show(
             break;
 
         case 1:
+            format_water_temperature_line(line1, sizeof(line1), water_temperature);
+            snprintf(line2, sizeof(line2), "Sonda DS18B20");
+            break;
+
+        case 2:
             snprintf(line1, sizeof(line1), "Livello: %s", level_present ? "OK" : "BASSO");
             snprintf(line2, sizeof(line2), "Flusso: %s", flow_detected ? "SI" : "NO");
             break;
 
-        case 2:
+        case 3:
             if (veml.valid) {
                 snprintf(line1, sizeof(line1), "Luce: %.0f lux", veml.lux);
                 snprintf(line2, sizeof(line2), "Raw ALS: %u", veml.raw_als);
@@ -58,7 +95,7 @@ void LcdCarousel::show(
             }
             break;
 
-        case 3:
+        case 4:
             if (tds.valid) {
                 snprintf(line1, sizeof(line1), "TDS: %.0f ppm", tds.ppm);
                 snprintf(line2, sizeof(line2), "Volt: %.2f V", tds.voltage);

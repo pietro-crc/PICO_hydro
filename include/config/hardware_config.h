@@ -6,6 +6,8 @@
 
 namespace hydro::config {
 
+constexpr const char *FIRMWARE_VERSION = "PICO Hydro 0.5";
+
 constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN;
 
 constexpr uint LCD_SDA_PIN = 0;
@@ -16,6 +18,7 @@ constexpr uint FLOW_SENSOR_PIN = 4;
 constexpr uint DHT_PIN = 5;
 constexpr uint VEML_SDA_PIN = 6;
 constexpr uint VEML_SCL_PIN = 7;
+constexpr uint WATER_TEMPERATURE_PIN = 8;
 constexpr uint TDS_ADC_PIN = 26;
 constexpr uint TDS_ADC_INPUT = 0;
 
@@ -27,8 +30,11 @@ constexpr uint32_t SAMPLE_TIME_MS = 1000;
 constexpr uint32_t DHT_READ_INTERVAL_MS = 5000;
 constexpr uint32_t VEML_READ_INTERVAL_MS = 2000;
 constexpr uint32_t TDS_READ_INTERVAL_MS = 2000;
+constexpr uint32_t WATER_TEMPERATURE_READ_INTERVAL_MS = 5000;
+constexpr uint32_t WATER_TEMPERATURE_FIRST_READ_DELAY_MS = 10000;
 constexpr uint32_t LCD_CAROUSEL_INTERVAL_MS = 3000;
 constexpr uint32_t MIN_PULSE_DISTANCE_US = 1000;
+constexpr uint32_t STARTUP_DIAGNOSTIC_SCREEN_MS = 650;
 
 constexpr bool ENABLE_STARTUP_DELAY = false;
 constexpr bool ENABLE_ONBOARD_LED_STARTUP = true;
@@ -36,11 +42,13 @@ constexpr bool ENABLE_STRIP_STARTUP_TEST = false;
 constexpr bool ENABLE_LCD_DIAGNOSTIC = false;
 constexpr bool ENABLE_STARTUP_DIAGNOSTICS = true;
 constexpr bool ENABLE_SERIAL_LOG = true;
+constexpr bool ENABLE_WATER_TEMPERATURE_SENSOR = true;
 
 constexpr float PULSES_PER_LITER = 450.0f;
 constexpr float ADC_MAX_VALUE = 4095.0f;
 constexpr float PICO_ADC_REFERENCE_VOLTAGE = 3.3f;
 constexpr float TDS_TEMPERATURE_COMPENSATION_C = 25.0f;
+constexpr uint32_t DS18B20_CONVERSION_TIME_MS = 750;
 
 constexpr uint8_t VEML7700_ADDRESS = 0x10;
 constexpr uint8_t VEML7700_REG_ALS_CONF = 0x00;
