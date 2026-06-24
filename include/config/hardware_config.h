@@ -1,0 +1,62 @@
+#pragma once
+
+#include "pico/stdlib.h"
+
+#include <cstdint>
+
+namespace hydro::config {
+
+constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN;
+
+constexpr uint LCD_SDA_PIN = 0;
+constexpr uint LCD_SCL_PIN = 1;
+constexpr uint LEVEL_SENSOR_PIN = 2;
+constexpr uint STRIP_PIN = 3;
+constexpr uint FLOW_SENSOR_PIN = 4;
+constexpr uint DHT_PIN = 5;
+constexpr uint VEML_SDA_PIN = 6;
+constexpr uint VEML_SCL_PIN = 7;
+constexpr uint TDS_ADC_PIN = 26;
+constexpr uint TDS_ADC_INPUT = 0;
+
+constexpr bool DHT_SENSOR_IS_DHT11 = true;
+constexpr uint STRIP_LED_COUNT = 8;
+constexpr bool LEVEL_WATER_PRESENT_WHEN_HIGH = true;
+
+constexpr uint32_t SAMPLE_TIME_MS = 1000;
+constexpr uint32_t DHT_READ_INTERVAL_MS = 5000;
+constexpr uint32_t VEML_READ_INTERVAL_MS = 2000;
+constexpr uint32_t TDS_READ_INTERVAL_MS = 2000;
+constexpr uint32_t LCD_CAROUSEL_INTERVAL_MS = 3000;
+constexpr uint32_t MIN_PULSE_DISTANCE_US = 1000;
+
+constexpr bool ENABLE_STARTUP_DELAY = false;
+constexpr bool ENABLE_ONBOARD_LED_STARTUP = true;
+constexpr bool ENABLE_STRIP_STARTUP_TEST = false;
+constexpr bool ENABLE_LCD_DIAGNOSTIC = false;
+constexpr bool ENABLE_STARTUP_DIAGNOSTICS = true;
+constexpr bool ENABLE_SERIAL_LOG = true;
+
+constexpr float PULSES_PER_LITER = 450.0f;
+constexpr float ADC_MAX_VALUE = 4095.0f;
+constexpr float PICO_ADC_REFERENCE_VOLTAGE = 3.3f;
+constexpr float TDS_TEMPERATURE_COMPENSATION_C = 25.0f;
+
+constexpr uint8_t VEML7700_ADDRESS = 0x10;
+constexpr uint8_t VEML7700_REG_ALS_CONF = 0x00;
+constexpr uint8_t VEML7700_REG_ALS_DATA = 0x04;
+constexpr float VEML7700_LUX_PER_COUNT_GAIN_1_IT_100MS = 0.0576f;
+
+constexpr uint8_t FLOW_GREEN_BRIGHTNESS = 40;
+constexpr uint8_t FLOW_IDLE_BLUE_BRIGHTNESS = 25;
+constexpr uint8_t LEVEL_WATER_GREEN_BRIGHTNESS = 40;
+constexpr uint8_t LEVEL_LOW_RED_BRIGHTNESS = 40;
+
+constexpr bool LCD_BACKLIGHT_ACTIVE_LOW = false;
+constexpr uint8_t LCD_BACKLIGHT_BIT = 0x08;
+constexpr uint8_t LCD_BACKLIGHT_ON = LCD_BACKLIGHT_ACTIVE_LOW ? 0x00 : LCD_BACKLIGHT_BIT;
+constexpr uint8_t LCD_BACKLIGHT_OFF = LCD_BACKLIGHT_ACTIVE_LOW ? LCD_BACKLIGHT_BIT : 0x00;
+constexpr uint8_t LCD_ENABLE = 0x04;
+constexpr uint8_t LCD_RS = 0x01;
+
+}

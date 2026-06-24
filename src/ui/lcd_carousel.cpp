@@ -1,0 +1,80 @@
+#include "ui/lcd_carousel.h"
+
+#include <stdio.h>
+
+namespace hydro {
+
+LcdCarousel::LcdCarousel(Lcd1602I2c *lcd) : lcd_(lcd) {}
+
+void LcdCarousel::format_temperature_line(char *line, size_t line_size, const DhtReading &dht) {
+    if (!dht.valid) {
+        snprintf(line, line_size, "Temp: attesa");
+        return;
+    }
+
+    snprintf(line, line_size, "Temp: %.1f C", dht.temperature_c);
+}
+
+void LcdCarousel::format_humidity_line(char *line, size_t line_size, const DhtReading &dht) {
+    if (!dht.valid) {
+        snprintf(line, line_size, "Umid: attesa");
+        return;
+    }
+
+    snprintf(line, line_size, "Umid: %.1f %%", dht.humidity_percent);
+}
+
+void LcdCarousel::show(
+    uint8_t page,
+    const DhtReading &dht,
+    const VemlReading &veml,
+    const TdsReading &tds,
+    bool level_present,
+    bool flow_detected,
+    float liters_per_minute,
+    float total_liters
+) {
+    char line1[17];
+    char line2[17];
+
+    switch (page) {
+        case 0:
+            format_temperature_line(line1, sizeof(line1), dht);
+            format_humidity_line(line2, sizeof(line2), dht);
+            break;
+
+        case 1:
+            snprintf(line1, sizeof(line1), "Livello: %s", level_present ? "OK" : "BASSO");
+            snprintf(line2, sizeof(line2), "Flusso: %s", flow_detected ? "SI" : "NO");
+            break;
+
+        case 2:
+            if (veml.valid) {
+                snprintf(line1, sizeof(line1), "Luce: %.0f lux", veml.lux);
+                snprintf(line2, sizeof(line2), "Raw ALS: %u", veml.raw_als);
+            } else {
+                snprintf(line1, sizeof(line1), "Luce: attesa");
+                snprintf(line2, sizeof(line2), "VEML7700 ERR");
+            }
+            break;
+
+        case 3:
+            if (tds.valid) {
+                snprintf(line1, sizeof(line1), "TDS: %.0f ppm", tds.ppm);
+                snprintf(line2, sizeof(line2), "Volt: %.2f V", tds.voltage);
+            } else {
+                snprintf(line1, sizeof(line1), "TDS: attesa");
+                snprintf(line2, sizeof(line2), "ADC ERR");
+            }
+            break;
+
+        default:
+            snprintf(line1, sizeof(line1), "Flow: %.1f L/m", liters_per_minute);
+            snprintf(line2, sizeof(line2), "Tot: %.3f L", total_liters);
+            break;
+    }
+
+    lcd_->show_lines(line1, line2);
+}
+
+}
