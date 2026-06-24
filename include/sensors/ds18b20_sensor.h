@@ -12,11 +12,9 @@ public:
     explicit Ds18b20Sensor(uint pin);
 
     void init();
-    bool detect_device();
     bool start_temperature_conversion();
     WaterTemperatureStatus last_status() const;
     WaterTemperatureReading read_converted_temperature_c();
-    WaterTemperatureReading read_temperature_c();
 
 private:
     bool reset_bus();

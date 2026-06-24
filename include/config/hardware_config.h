@@ -6,7 +6,7 @@
 
 namespace hydro::config {
 
-constexpr const char *FIRMWARE_VERSION = "PICO Hydro 0.5";
+constexpr const char *FIRMWARE_VERSION = "PICO Hydro 1.0";
 
 constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN;
 
@@ -31,10 +31,12 @@ constexpr uint32_t DHT_READ_INTERVAL_MS = 5000;
 constexpr uint32_t VEML_READ_INTERVAL_MS = 2000;
 constexpr uint32_t TDS_READ_INTERVAL_MS = 2000;
 constexpr uint32_t WATER_TEMPERATURE_READ_INTERVAL_MS = 5000;
-constexpr uint32_t WATER_TEMPERATURE_FIRST_READ_DELAY_MS = 10000;
+constexpr uint32_t WATER_TEMPERATURE_FIRST_READ_DELAY_MS = 1000;
+constexpr uint32_t WATER_TEMPERATURE_RETRY_DELAY_MS = 30000;
 constexpr uint32_t LCD_CAROUSEL_INTERVAL_MS = 3000;
 constexpr uint32_t MIN_PULSE_DISTANCE_US = 1000;
 constexpr uint32_t STARTUP_DIAGNOSTIC_SCREEN_MS = 650;
+constexpr uint I2C_OPERATION_TIMEOUT_US = 5000;
 
 constexpr bool ENABLE_STARTUP_DELAY = false;
 constexpr bool ENABLE_ONBOARD_LED_STARTUP = true;
@@ -43,7 +45,6 @@ constexpr bool ENABLE_LCD_DIAGNOSTIC = false;
 constexpr bool ENABLE_STARTUP_DIAGNOSTICS = true;
 constexpr bool ENABLE_SERIAL_LOG = true;
 constexpr bool ENABLE_WATER_TEMPERATURE_SENSOR = true;
-
 constexpr float PULSES_PER_LITER = 450.0f;
 constexpr float ADC_MAX_VALUE = 4095.0f;
 constexpr float PICO_ADC_REFERENCE_VOLTAGE = 3.3f;

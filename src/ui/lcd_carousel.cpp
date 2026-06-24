@@ -1,5 +1,7 @@
 #include "ui/lcd_carousel.h"
 
+#include "config/hardware_config.h"
+
 #include <stdio.h>
 
 namespace hydro {
@@ -28,7 +30,7 @@ void LcdCarousel::format_water_temperature_line(char *line, size_t line_size, co
     if (!water_temperature.valid) {
         switch (water_temperature.status) {
             case WaterTemperatureStatus::not_read:
-                snprintf(line, line_size, "Acqua: attesa");
+                snprintf(line, line_size, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "Acqua: attesa" : "Acqua: OFF");
                 break;
             case WaterTemperatureStatus::bus_stuck_low:
                 snprintf(line, line_size, "Acqua: DAT LOW");

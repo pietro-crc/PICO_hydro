@@ -13,7 +13,7 @@ bool Veml7700Sensor::write_register(uint8_t reg, uint16_t value) {
         (uint8_t)((value >> 8) & 0xFF)
     };
 
-    int result = i2c_write_blocking(i2c_, config::VEML7700_ADDRESS, buffer, sizeof(buffer), false);
+    int result = i2c_write_timeout_us(i2c_, config::VEML7700_ADDRESS, buffer, sizeof(buffer), false, config::I2C_OPERATION_TIMEOUT_US);
     return result == (int)sizeof(buffer);
 }
 
@@ -22,13 +22,13 @@ bool Veml7700Sensor::read_register(uint8_t reg, uint16_t *value) {
         return false;
     }
 
-    int write_result = i2c_write_blocking(i2c_, config::VEML7700_ADDRESS, &reg, 1, true);
+    int write_result = i2c_write_timeout_us(i2c_, config::VEML7700_ADDRESS, &reg, 1, true, config::I2C_OPERATION_TIMEOUT_US);
     if (write_result != 1) {
         return false;
     }
 
     uint8_t buffer[2] = {0, 0};
-    int read_result = i2c_read_blocking(i2c_, config::VEML7700_ADDRESS, buffer, sizeof(buffer), false);
+    int read_result = i2c_read_timeout_us(i2c_, config::VEML7700_ADDRESS, buffer, sizeof(buffer), false, config::I2C_OPERATION_TIMEOUT_US);
     if (read_result != (int)sizeof(buffer)) {
         return false;
     }

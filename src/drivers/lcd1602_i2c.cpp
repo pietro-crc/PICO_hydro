@@ -20,7 +20,7 @@ bool Lcd1602I2c::write(uint8_t value) {
         return false;
     }
 
-    int result = i2c_write_blocking(i2c_, address_, &value, 1, false);
+    int result = i2c_write_timeout_us(i2c_, address_, &value, 1, false, config::I2C_OPERATION_TIMEOUT_US);
     return result == 1;
 }
 
@@ -107,7 +107,7 @@ uint8_t Lcd1602I2c::find_address() {
 
     for (uint i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
         uint8_t value = 0;
-        int result = i2c_write_blocking(i2c_, candidates[i], &value, 1, false);
+        int result = i2c_write_timeout_us(i2c_, candidates[i], &value, 1, false, config::I2C_OPERATION_TIMEOUT_US);
         if (result == 1) {
             return candidates[i];
         }

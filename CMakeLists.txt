@@ -50,7 +50,7 @@ add_executable(PICO_hydro
         )
 
 pico_set_program_name(PICO_hydro "PICO_hydro")
-pico_set_program_version(PICO_hydro "0.1")
+pico_set_program_version(PICO_hydro "1.0")
 
 # Generate PIO header
 pico_generate_pio_header(PICO_hydro ${CMAKE_CURRENT_LIST_DIR}/pio/ws2812.pio)

@@ -26,7 +26,9 @@ void HydroController::init_gpio() {
 
     level_sensor_.init();
     dht_sensor_.init();
-    water_temperature_sensor_.init();
+    if (config::ENABLE_WATER_TEMPERATURE_SENSOR) {
+        water_temperature_sensor_.init();
+    }
 }
 
 void HydroController::init_i2c() {
@@ -128,9 +130,10 @@ HydroController::StartupDiagnostics HydroController::run_startup_diagnostics(boo
     diagnostics.dht_read_ok = dht_sensor_.read(&diagnostics.dht);
     show_startup_progress(70, diagnostics.dht_read_ok ? "DHT OK" : "DHT ERR");
 
-    show_startup_progress(72, "Acqua nel loop");
+    show_startup_progress(72, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "Acqua async" : "Acqua OFF");
     diagnostics.water_temperature_read_ok = false;
-    show_startup_progress(85, "DS18B20 skip");
+    diagnostics.water_temperature.status = WaterTemperatureStatus::not_read;
+    show_startup_progress(85, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "DS18B20 defer" : "Sensore OFF");
 
     show_startup_progress(90, "TDS ADC");
     diagnostics.tds = tds_sensor_.read();
@@ -160,6 +163,7 @@ void HydroController::show_startup_diagnostics(const StartupDiagnostics &diagnos
     char line1[17];
     char line2[17];
     uint8_t ok_count = 0;
+    constexpr uint8_t startup_check_count = 4;
 
     if (diagnostics.lcd_ok) {
         ok_count++;
@@ -173,16 +177,12 @@ void HydroController::show_startup_diagnostics(const StartupDiagnostics &diagnos
         ok_count++;
     }
 
-    if (diagnostics.water_temperature_read_ok) {
-        ok_count++;
-    }
-
     if (diagnostics.tds.valid) {
         ok_count++;
     }
 
-    snprintf(line1, sizeof(line1), "Diag %u/5 OK", ok_count);
-    snprintf(line2, sizeof(line2), "Liv %s Flow att", diagnostics.level_present ? "OK" : "BASSO");
+    snprintf(line1, sizeof(line1), "Diag %u/%u OK", ok_count, startup_check_count);
+    snprintf(line2, sizeof(line2), "DS18B20 async");
     lcd_.show_lines(line1, line2);
     sleep_ms(config::STARTUP_DIAGNOSTIC_SCREEN_MS);
 }
@@ -197,7 +197,7 @@ void HydroController::log_startup(const StartupDiagnostics &diagnostics) const {
     printf("LCD I2C GP%u/GP%u: %s address=0x%02X\n", config::LCD_SDA_PIN, config::LCD_SCL_PIN, diagnostics.lcd_ok ? "OK" : "ERR", lcd_.address());
     printf("VEML7700 GP%u/GP%u: init=%s read=%s lux=%.0f raw=%u\n", config::VEML_SDA_PIN, config::VEML_SCL_PIN, diagnostics.veml_init_ok ? "OK" : "ERR", diagnostics.veml_read_ok ? "OK" : "ERR", diagnostics.veml.lux, diagnostics.veml.raw_als);
     printf("DHT GP%u: %s T=%.1fC H=%.1f%%\n", config::DHT_PIN, diagnostics.dht_read_ok ? "OK" : "ERR", diagnostics.dht.temperature_c, diagnostics.dht.humidity_percent);
-    printf("DS18B20 GP%u: present=%s read=%s status=%u T=%.1fC\n", config::WATER_TEMPERATURE_PIN, diagnostics.water_temperature.device_present ? "SI" : "NO", diagnostics.water_temperature_read_ok ? "OK" : "ERR", (unsigned)diagnostics.water_temperature.status, diagnostics.water_temperature.temperature_c);
+    printf("DS18B20 GP%u: enabled=%s startup=%s status=%u T=%.1fC\n", config::WATER_TEMPERATURE_PIN, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "SI" : "NO", config::ENABLE_WATER_TEMPERATURE_SENSOR ? "DEFER" : "OFF", (unsigned)diagnostics.water_temperature.status, diagnostics.water_temperature.temperature_c);
     printf("TDS GP%u ADC%u: raw=%u voltage=%.2fV ppm=%.0f\n", config::TDS_ADC_PIN, config::TDS_ADC_INPUT, diagnostics.tds.raw_adc, diagnostics.tds.voltage, diagnostics.tds.ppm);
     printf("Livello GP%u: %s\n", config::LEVEL_SENSOR_PIN, diagnostics.level_present ? "OK" : "BASSO");
     printf("Flusso GP%u: attivo, verifica muovendo acqua\n", config::FLOW_SENSOR_PIN);
@@ -315,13 +315,13 @@ void HydroController::init() {
             } else if (!water_temperature_conversion_pending_) {
                 bool conversion_started = water_temperature_sensor_.start_temperature_conversion();
                 if (conversion_started) {
-                    water_temperature_.device_present = true;
+                    water_temperature_ = {false, true, WaterTemperatureStatus::conversion_started, 0.0f};
                     water_temperature_conversion_pending_ = true;
                     water_temperature_ready_ms_ = now_ms + config::DS18B20_CONVERSION_TIME_MS;
                     next_water_temperature_read_ms = water_temperature_ready_ms_;
                 } else {
                     water_temperature_ = {false, false, water_temperature_sensor_.last_status(), 0.0f};
-                    next_water_temperature_read_ms = now_ms + config::WATER_TEMPERATURE_READ_INTERVAL_MS;
+                    next_water_temperature_read_ms = now_ms + config::WATER_TEMPERATURE_RETRY_DELAY_MS;
                 }
             } else if (now_ms >= water_temperature_ready_ms_) {
                 WaterTemperatureReading new_reading = water_temperature_sensor_.read_converted_temperature_c();
@@ -332,7 +332,11 @@ void HydroController::init() {
                 }
 
                 water_temperature_conversion_pending_ = false;
-                next_water_temperature_read_ms = now_ms + config::WATER_TEMPERATURE_READ_INTERVAL_MS;
+                next_water_temperature_read_ms = now_ms + (
+                    new_reading.valid
+                        ? config::WATER_TEMPERATURE_READ_INTERVAL_MS
+                        : config::WATER_TEMPERATURE_RETRY_DELAY_MS
+                );
             }
         }
 

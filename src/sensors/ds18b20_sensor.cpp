@@ -1,8 +1,8 @@
 #include "sensors/ds18b20_sensor.h"
 
-#include "config/hardware_config.h"
 #include "hardware/gpio.h"
 #include "hardware/sync.h"
+#include "hardware/timer.h"
 #include "pico/stdlib.h"
 
 namespace hydro {
@@ -11,6 +11,10 @@ namespace {
 constexpr uint8_t DS18B20_CMD_SKIP_ROM = 0xCC;
 constexpr uint8_t DS18B20_CMD_CONVERT_T = 0x44;
 constexpr uint8_t DS18B20_CMD_READ_SCRATCHPAD = 0xBE;
+
+inline void ow_delay_us(uint32_t microseconds) {
+    busy_wait_us_32(microseconds);
+}
 
 }
 
@@ -21,10 +25,6 @@ void Ds18b20Sensor::init() {
     gpio_set_dir(pin_, GPIO_IN);
     gpio_pull_up(pin_);
     last_status_ = WaterTemperatureStatus::not_read;
-}
-
-bool Ds18b20Sensor::detect_device() {
-    return reset_bus();
 }
 
 WaterTemperatureStatus Ds18b20Sensor::last_status() const {
@@ -47,7 +47,7 @@ bool Ds18b20Sensor::reset_bus() {
 
     gpio_set_dir(pin_, GPIO_IN);
     gpio_pull_up(pin_);
-    sleep_us(10);
+    ow_delay_us(10);
 
     if (!gpio_get(pin_)) {
         restore_interrupts(interrupt_state);
@@ -57,14 +57,14 @@ bool Ds18b20Sensor::reset_bus() {
 
     gpio_set_dir(pin_, GPIO_OUT);
     gpio_put(pin_, 0);
-    sleep_us(480);
+    ow_delay_us(480);
 
     gpio_set_dir(pin_, GPIO_IN);
     gpio_pull_up(pin_);
-    sleep_us(70);
+    ow_delay_us(70);
 
     bool device_present = !gpio_get(pin_);
-    sleep_us(410);
+    ow_delay_us(410);
 
     restore_interrupts(interrupt_state);
     if (!device_present) {
@@ -80,15 +80,15 @@ void Ds18b20Sensor::write_bit(bool value) {
     gpio_put(pin_, 0);
 
     if (value) {
-        sleep_us(6);
+        ow_delay_us(6);
         gpio_set_dir(pin_, GPIO_IN);
         gpio_pull_up(pin_);
-        sleep_us(64);
+        ow_delay_us(64);
     } else {
-        sleep_us(60);
+        ow_delay_us(60);
         gpio_set_dir(pin_, GPIO_IN);
         gpio_pull_up(pin_);
-        sleep_us(10);
+        ow_delay_us(10);
     }
 
     restore_interrupts(interrupt_state);
@@ -99,14 +99,14 @@ bool Ds18b20Sensor::read_bit() {
 
     gpio_set_dir(pin_, GPIO_OUT);
     gpio_put(pin_, 0);
-    sleep_us(6);
+    ow_delay_us(2);
 
     gpio_set_dir(pin_, GPIO_IN);
     gpio_pull_up(pin_);
-    sleep_us(9);
+    ow_delay_us(10);
 
     bool value = gpio_get(pin_);
-    sleep_us(55);
+    ow_delay_us(53);
 
     restore_interrupts(interrupt_state);
     return value;
@@ -147,20 +147,6 @@ uint8_t Ds18b20Sensor::crc8(const uint8_t *data, uint8_t length) {
     }
 
     return crc;
-}
-
-WaterTemperatureReading Ds18b20Sensor::read_temperature_c() {
-    WaterTemperatureReading reading = {false, false, WaterTemperatureStatus::not_read, 0.0f};
-
-    if (!start_temperature_conversion()) {
-        reading.status = last_status_;
-        return reading;
-    }
-
-    reading.device_present = true;
-    reading.status = WaterTemperatureStatus::conversion_started;
-    sleep_ms(config::DS18B20_CONVERSION_TIME_MS);
-    return read_converted_temperature_c();
 }
 
 WaterTemperatureReading Ds18b20Sensor::read_converted_temperature_c() {
