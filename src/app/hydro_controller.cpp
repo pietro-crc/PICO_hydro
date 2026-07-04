@@ -11,6 +11,7 @@ namespace hydro {
 
 HydroController::HydroController()
     : lcd_(i2c0),
+      wifi_module_(uart0, config::ESP8266_UART_TX_PIN, config::ESP8266_UART_RX_PIN),
       veml_sensor_(i2c1),
       tds_sensor_(config::TDS_ADC_PIN, config::TDS_ADC_INPUT),
       water_temperature_sensor_(config::WATER_TEMPERATURE_PIN),
@@ -119,7 +120,9 @@ HydroController::StartupDiagnostics HydroController::run_startup_diagnostics(boo
         {false, 0, 0.0f, 0.0f},
         {false, 0, 0.0f},
         {false, 0.0f, 0.0f},
-        {false, false, WaterTemperatureStatus::not_read, 0.0f}
+        {false, false, WaterTemperatureStatus::not_read, 0.0f},
+        0,
+        {config::ENABLE_ESP8266_WIFI, false, false, false, false, 0, Esp8266Status::not_checked}
     };
 
     show_startup_progress(45, "VEML7700");
@@ -131,9 +134,26 @@ HydroController::StartupDiagnostics HydroController::run_startup_diagnostics(boo
     show_startup_progress(70, diagnostics.dht_read_ok ? "DHT OK" : "DHT ERR");
 
     show_startup_progress(72, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "Acqua async" : "Acqua OFF");
-    diagnostics.water_temperature_read_ok = false;
-    diagnostics.water_temperature.status = WaterTemperatureStatus::not_read;
-    show_startup_progress(85, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "DS18B20 defer" : "Sensore OFF");
+    if (config::ENABLE_WATER_TEMPERATURE_SENSOR) {
+        water_temperature_count_ = water_temperature_sensor_.discover_devices();
+        diagnostics.water_temperature_sensor_count = water_temperature_count_;
+        diagnostics.water_temperature_read_ok = water_temperature_count_ > 0;
+        diagnostics.water_temperature.status = water_temperature_count_ > 0
+            ? WaterTemperatureStatus::not_read
+            : water_temperature_sensor_.last_status();
+        show_startup_progress(85, water_temperature_count_ > 0 ? "DS18B20 trov" : "DS18B20 NO");
+    } else {
+        diagnostics.water_temperature_read_ok = false;
+        diagnostics.water_temperature.status = WaterTemperatureStatus::not_read;
+        show_startup_progress(85, "Sensore OFF");
+    }
+
+    if (config::ENABLE_ESP8266_WIFI) {
+        show_startup_progress(86, "ESP8266 AT");
+        diagnostics.wifi = wifi_module_.run_startup_diagnostic();
+        wifi_ = diagnostics.wifi;
+        show_startup_progress(88, diagnostics.wifi.access_point_enabled ? "AP WiFi OK" : (diagnostics.wifi.module_present ? "ESP AT OK" : "ESP no AT"));
+    }
 
     show_startup_progress(90, "TDS ADC");
     diagnostics.tds = tds_sensor_.read();
@@ -163,7 +183,7 @@ void HydroController::show_startup_diagnostics(const StartupDiagnostics &diagnos
     char line1[17];
     char line2[17];
     uint8_t ok_count = 0;
-    constexpr uint8_t startup_check_count = 4;
+    uint8_t startup_check_count = config::ENABLE_ESP8266_WIFI ? 5 : 4;
 
     if (diagnostics.lcd_ok) {
         ok_count++;
@@ -181,8 +201,16 @@ void HydroController::show_startup_diagnostics(const StartupDiagnostics &diagnos
         ok_count++;
     }
 
+    if (config::ENABLE_ESP8266_WIFI && diagnostics.wifi.module_present) {
+        ok_count++;
+    }
+
     snprintf(line1, sizeof(line1), "Diag %u/%u OK", ok_count, startup_check_count);
-    snprintf(line2, sizeof(line2), "DS18B20 async");
+    if (config::ENABLE_ESP8266_WIFI) {
+        snprintf(line2, sizeof(line2), "ESP %s", diagnostics.wifi.module_present ? "AT OK" : "no AT");
+    } else {
+        snprintf(line2, sizeof(line2), "DS18B20 async");
+    }
     lcd_.show_lines(line1, line2);
     sleep_ms(config::STARTUP_DIAGNOSTIC_SCREEN_MS);
 }
@@ -197,7 +225,8 @@ void HydroController::log_startup(const StartupDiagnostics &diagnostics) const {
     printf("LCD I2C GP%u/GP%u: %s address=0x%02X\n", config::LCD_SDA_PIN, config::LCD_SCL_PIN, diagnostics.lcd_ok ? "OK" : "ERR", lcd_.address());
     printf("VEML7700 GP%u/GP%u: init=%s read=%s lux=%.0f raw=%u\n", config::VEML_SDA_PIN, config::VEML_SCL_PIN, diagnostics.veml_init_ok ? "OK" : "ERR", diagnostics.veml_read_ok ? "OK" : "ERR", diagnostics.veml.lux, diagnostics.veml.raw_als);
     printf("DHT GP%u: %s T=%.1fC H=%.1f%%\n", config::DHT_PIN, diagnostics.dht_read_ok ? "OK" : "ERR", diagnostics.dht.temperature_c, diagnostics.dht.humidity_percent);
-    printf("DS18B20 GP%u: enabled=%s startup=%s status=%u T=%.1fC\n", config::WATER_TEMPERATURE_PIN, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "SI" : "NO", config::ENABLE_WATER_TEMPERATURE_SENSOR ? "DEFER" : "OFF", (unsigned)diagnostics.water_temperature.status, diagnostics.water_temperature.temperature_c);
+    printf("DS18B20 GP%u: enabled=%s sensors=%u status=%u T=%.1fC\n", config::WATER_TEMPERATURE_PIN, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "SI" : "NO", diagnostics.water_temperature_sensor_count, (unsigned)diagnostics.water_temperature.status, diagnostics.water_temperature.temperature_c);
+    printf("ESP8266 UART0 GP%u->RX GP%u<-TX: enabled=%s present=%s baud=%lu echo=%s gmr=%s ap=%s ssid=\"%s\" status=%u\n", config::ESP8266_UART_TX_PIN, config::ESP8266_UART_RX_PIN, config::ENABLE_ESP8266_WIFI ? "SI" : "NO", diagnostics.wifi.module_present ? "SI" : "NO", (unsigned long)diagnostics.wifi.baudrate, diagnostics.wifi.echo_disabled ? "OK" : "NO", diagnostics.wifi.firmware_queried ? "OK" : "NO", diagnostics.wifi.access_point_enabled ? "OK" : "NO", config::ESP8266_AP_SSID, (unsigned)diagnostics.wifi.status);
     printf("TDS GP%u ADC%u: raw=%u voltage=%.2fV ppm=%.0f\n", config::TDS_ADC_PIN, config::TDS_ADC_INPUT, diagnostics.tds.raw_adc, diagnostics.tds.voltage, diagnostics.tds.ppm);
     printf("Livello GP%u: %s\n", config::LEVEL_SENSOR_PIN, diagnostics.level_present ? "OK" : "BASSO");
     printf("Flusso GP%u: attivo, verifica muovendo acqua\n", config::FLOW_SENSOR_PIN);
@@ -244,6 +273,11 @@ void HydroController::init() {
 
     init_i2c();
     show_startup_progress(25, "I2C pronto");
+
+    if (config::ENABLE_ESP8266_WIFI) {
+        wifi_module_.init(config::ESP8266_UART_BAUDRATE);
+        show_startup_progress(28, "UART ESP init");
+    }
 
     tds_sensor_.init();
     show_startup_progress(30, "ADC pronto");
@@ -313,9 +347,16 @@ void HydroController::init() {
             if (!config::ENABLE_WATER_TEMPERATURE_SENSOR) {
                 next_water_temperature_read_ms = now_ms + config::WATER_TEMPERATURE_READ_INTERVAL_MS;
             } else if (!water_temperature_conversion_pending_) {
+                if (water_temperature_count_ == 0) {
+                    water_temperature_count_ = water_temperature_sensor_.discover_devices();
+                }
+
                 bool conversion_started = water_temperature_sensor_.start_temperature_conversion();
                 if (conversion_started) {
                     water_temperature_ = {false, true, WaterTemperatureStatus::conversion_started, 0.0f};
+                    for (uint8_t i = 0; i < water_temperature_count_; ++i) {
+                        water_temperatures_[i] = water_temperature_;
+                    }
                     water_temperature_conversion_pending_ = true;
                     water_temperature_ready_ms_ = now_ms + config::DS18B20_CONVERSION_TIME_MS;
                     next_water_temperature_read_ms = water_temperature_ready_ms_;
@@ -324,16 +365,29 @@ void HydroController::init() {
                     next_water_temperature_read_ms = now_ms + config::WATER_TEMPERATURE_RETRY_DELAY_MS;
                 }
             } else if (now_ms >= water_temperature_ready_ms_) {
-                WaterTemperatureReading new_reading = water_temperature_sensor_.read_converted_temperature_c();
-                if (new_reading.device_present) {
-                    water_temperature_ = new_reading;
-                } else if (!water_temperature_.valid) {
-                    water_temperature_ = new_reading;
+                bool any_valid_reading = false;
+
+                for (uint8_t i = 0; i < water_temperature_count_; ++i) {
+                    WaterTemperatureReading new_reading = water_temperature_sensor_.read_converted_temperature_c(i);
+                    if (new_reading.device_present) {
+                        water_temperatures_[i] = new_reading;
+                    } else if (!water_temperatures_[i].valid) {
+                        water_temperatures_[i] = new_reading;
+                    }
+
+                    if (water_temperatures_[i].valid && !any_valid_reading) {
+                        water_temperature_ = water_temperatures_[i];
+                        any_valid_reading = true;
+                    }
+                }
+
+                if (!any_valid_reading && water_temperature_count_ > 0) {
+                    water_temperature_ = water_temperatures_[0];
                 }
 
                 water_temperature_conversion_pending_ = false;
                 next_water_temperature_read_ms = now_ms + (
-                    new_reading.valid
+                    any_valid_reading
                         ? config::WATER_TEMPERATURE_READ_INTERVAL_MS
                         : config::WATER_TEMPERATURE_RETRY_DELAY_MS
                 );
@@ -357,8 +411,11 @@ void HydroController::init() {
         }
 
         if (lcd_.available() && now_ms >= next_lcd_update_ms) {
-            carousel_.show(lcd_page_, dht_, water_temperature_, veml_, tds_, level_present, flow_detected_, liters_per_minute_, total_liters_);
-            lcd_page_ = (lcd_page_ + 1) % 6;
+            carousel_.show(lcd_page_, dht_, water_temperatures_, water_temperature_count_, water_temperature_lcd_index_, veml_, tds_, level_present, flow_detected_, wifi_, liters_per_minute_, total_liters_);
+            if (lcd_page_ == 1 && water_temperature_count_ > 0) {
+                water_temperature_lcd_index_ = (water_temperature_lcd_index_ + 1) % water_temperature_count_;
+            }
+            lcd_page_ = (lcd_page_ + 1) % 7;
             next_lcd_update_ms = now_ms + config::LCD_CAROUSEL_INTERVAL_MS;
         }
 

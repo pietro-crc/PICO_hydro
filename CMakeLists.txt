@@ -38,6 +38,7 @@ pico_sdk_init()
 add_executable(PICO_hydro
         PICO_hydro.cpp
         src/app/hydro_controller.cpp
+        src/drivers/esp8266_at.cpp
         src/drivers/lcd1602_i2c.cpp
         src/drivers/ws2812_strip.cpp
         src/sensors/ds18b20_sensor.cpp
@@ -55,9 +56,9 @@ pico_set_program_version(PICO_hydro "1.0")
 # Generate PIO header
 pico_generate_pio_header(PICO_hydro ${CMAKE_CURRENT_LIST_DIR}/pio/ws2812.pio)
 
-# Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(PICO_hydro 1)
-pico_enable_stdio_usb(PICO_hydro 0)
+# Keep UART pins free for project hardware. Logs are exposed over USB CDC.
+pico_enable_stdio_uart(PICO_hydro 0)
+pico_enable_stdio_usb(PICO_hydro 1)
 
 # Add the standard library to the build
 # hardware_adc serve per leggere il sensore TDS su GP26 / ADC0.
@@ -65,7 +66,8 @@ target_link_libraries(PICO_hydro
         pico_stdlib
         hardware_adc
         hardware_i2c
-        hardware_pio)
+        hardware_pio
+        hardware_uart)
 
 # Add the standard include files to the build
 target_include_directories(PICO_hydro PRIVATE

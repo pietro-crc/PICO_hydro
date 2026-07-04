@@ -9,8 +9,11 @@ namespace hydro {
 namespace {
 
 constexpr uint8_t DS18B20_CMD_SKIP_ROM = 0xCC;
+constexpr uint8_t DS18B20_CMD_SEARCH_ROM = 0xF0;
+constexpr uint8_t DS18B20_CMD_MATCH_ROM = 0x55;
 constexpr uint8_t DS18B20_CMD_CONVERT_T = 0x44;
 constexpr uint8_t DS18B20_CMD_READ_SCRATCHPAD = 0xBE;
+constexpr uint8_t DS18B20_FAMILY_CODE = 0x28;
 
 inline void ow_delay_us(uint32_t microseconds) {
     busy_wait_us_32(microseconds);
@@ -24,7 +27,85 @@ void Ds18b20Sensor::init() {
     gpio_init(pin_);
     gpio_set_dir(pin_, GPIO_IN);
     gpio_pull_up(pin_);
+    device_count_ = 0;
     last_status_ = WaterTemperatureStatus::not_read;
+}
+
+uint8_t Ds18b20Sensor::discover_devices() {
+    device_count_ = 0;
+
+    Ds18b20Address rom = {};
+    uint8_t last_discrepancy = 0;
+    bool last_device = false;
+
+    while (!last_device && device_count_ < config::MAX_WATER_TEMPERATURE_SENSORS) {
+        if (!reset_bus()) {
+            return device_count_;
+        }
+
+        write_byte(DS18B20_CMD_SEARCH_ROM);
+        uint8_t discrepancy_marker = 0;
+
+        for (uint8_t bit_number = 1; bit_number <= 64; ++bit_number) {
+            bool id_bit = read_bit();
+            bool complement_bit = read_bit();
+
+            if (id_bit && complement_bit) {
+                device_count_ = 0;
+                last_status_ = WaterTemperatureStatus::invalid_data;
+                return 0;
+            }
+
+            bool direction;
+            uint8_t byte_index = (uint8_t)((bit_number - 1) / 8);
+            uint8_t bit_mask = (uint8_t)(1u << ((bit_number - 1) % 8));
+
+            if (id_bit != complement_bit) {
+                direction = id_bit;
+            } else {
+                if (bit_number < last_discrepancy) {
+                    direction = (rom.bytes[byte_index] & bit_mask) != 0;
+                } else {
+                    direction = bit_number == last_discrepancy;
+                }
+
+                if (!direction) {
+                    discrepancy_marker = bit_number;
+                }
+            }
+
+            if (direction) {
+                rom.bytes[byte_index] |= bit_mask;
+            } else {
+                rom.bytes[byte_index] &= (uint8_t)~bit_mask;
+            }
+
+            write_bit(direction);
+        }
+
+        last_discrepancy = discrepancy_marker;
+        last_device = last_discrepancy == 0;
+
+        if (rom.bytes[0] == DS18B20_FAMILY_CODE && crc8(rom.bytes, 7) == rom.bytes[7]) {
+            devices_[device_count_] = rom;
+            device_count_++;
+        } else {
+            last_status_ = WaterTemperatureStatus::invalid_data;
+        }
+    }
+
+    last_status_ = device_count_ > 0
+        ? WaterTemperatureStatus::not_read
+        : WaterTemperatureStatus::device_missing;
+    return device_count_;
+}
+
+uint8_t Ds18b20Sensor::device_count() const {
+    return device_count_;
+}
+
+const Ds18b20Address &Ds18b20Sensor::device_address(uint8_t index) const {
+    return devices_[index];
 }
 
 WaterTemperatureStatus Ds18b20Sensor::last_status() const {
@@ -32,6 +113,15 @@ WaterTemperatureStatus Ds18b20Sensor::last_status() const {
 }
 
 bool Ds18b20Sensor::start_temperature_conversion() {
+    if (device_count_ == 0) {
+        discover_devices();
+    }
+
+    if (device_count_ == 0) {
+        last_status_ = WaterTemperatureStatus::device_missing;
+        return false;
+    }
+
     if (!reset_bus()) {
         return false;
     }
@@ -131,6 +221,12 @@ uint8_t Ds18b20Sensor::read_byte() {
     return value;
 }
 
+void Ds18b20Sensor::write_address(const Ds18b20Address &address) {
+    for (uint8_t i = 0; i < sizeof(address.bytes); ++i) {
+        write_byte(address.bytes[i]);
+    }
+}
+
 uint8_t Ds18b20Sensor::crc8(const uint8_t *data, uint8_t length) {
     uint8_t crc = 0;
 
@@ -149,8 +245,14 @@ uint8_t Ds18b20Sensor::crc8(const uint8_t *data, uint8_t length) {
     return crc;
 }
 
-WaterTemperatureReading Ds18b20Sensor::read_converted_temperature_c() {
+WaterTemperatureReading Ds18b20Sensor::read_converted_temperature_c(uint8_t device_index) {
     WaterTemperatureReading reading = {false, false, WaterTemperatureStatus::not_read, 0.0f};
+
+    if (device_index >= device_count_) {
+        reading.status = WaterTemperatureStatus::device_missing;
+        last_status_ = reading.status;
+        return reading;
+    }
 
     if (!reset_bus()) {
         reading.status = last_status_;
@@ -158,7 +260,8 @@ WaterTemperatureReading Ds18b20Sensor::read_converted_temperature_c() {
     }
 
     reading.device_present = true;
-    write_byte(DS18B20_CMD_SKIP_ROM);
+    write_byte(DS18B20_CMD_MATCH_ROM);
+    write_address(devices_[device_index]);
     write_byte(DS18B20_CMD_READ_SCRATCHPAD);
 
     uint8_t scratchpad[9];
@@ -198,6 +301,14 @@ WaterTemperatureReading Ds18b20Sensor::read_converted_temperature_c() {
     reading.status = WaterTemperatureStatus::valid;
     last_status_ = reading.status;
     return reading;
+}
+
+WaterTemperatureReading Ds18b20Sensor::read_converted_temperature_c() {
+    if (device_count_ == 0) {
+        discover_devices();
+    }
+
+    return read_converted_temperature_c(0);
 }
 
 }

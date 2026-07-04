@@ -26,11 +26,11 @@ void LcdCarousel::format_humidity_line(char *line, size_t line_size, const DhtRe
     snprintf(line, line_size, "Umid: %.1f %%", dht.humidity_percent);
 }
 
-void LcdCarousel::format_water_temperature_line(char *line, size_t line_size, const WaterTemperatureReading &water_temperature) {
+void LcdCarousel::format_water_temperature_line(char *line, size_t line_size, const WaterTemperatureReading &water_temperature, uint8_t index) {
     if (!water_temperature.valid) {
         switch (water_temperature.status) {
             case WaterTemperatureStatus::not_read:
-                snprintf(line, line_size, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "Acqua: attesa" : "Acqua: OFF");
+                snprintf(line, line_size, config::ENABLE_WATER_TEMPERATURE_SENSOR ? "Acq%u: attesa" : "Acqua: OFF", index + 1);
                 break;
             case WaterTemperatureStatus::bus_stuck_low:
                 snprintf(line, line_size, "Acqua: DAT LOW");
@@ -54,17 +54,59 @@ void LcdCarousel::format_water_temperature_line(char *line, size_t line_size, co
         return;
     }
 
-    snprintf(line, line_size, "Acqua: %.1f C", water_temperature.temperature_c);
+    snprintf(line, line_size, "Acq%u: %.1f C", index + 1, water_temperature.temperature_c);
+}
+
+void LcdCarousel::format_wifi_line(char *line, size_t line_size, const Esp8266Diagnostic &wifi) {
+    if (!wifi.enabled) {
+        snprintf(line, line_size, "WiFi: OFF");
+        return;
+    }
+
+    if (!wifi.module_present) {
+        snprintf(line, line_size, "ESP: no AT");
+        return;
+    }
+
+    switch (wifi.status) {
+        case Esp8266Status::disabled:
+            snprintf(line, line_size, "WiFi: OFF");
+            break;
+        case Esp8266Status::not_checked:
+            snprintf(line, line_size, "WiFi: attesa");
+            break;
+        case Esp8266Status::uart_timeout:
+            snprintf(line, line_size, "ESP: timeout");
+            break;
+        case Esp8266Status::at_ok:
+            snprintf(line, line_size, "ESP: AT OK");
+            break;
+        case Esp8266Status::echo_off_ok:
+            snprintf(line, line_size, "ESP: echo OK");
+            break;
+        case Esp8266Status::firmware_ok:
+            snprintf(line, line_size, "ESP: fw OK");
+            break;
+        case Esp8266Status::ap_mode_ok:
+            snprintf(line, line_size, "AP: modo OK");
+            break;
+        case Esp8266Status::ap_ready:
+            snprintf(line, line_size, "AP: visibile");
+            break;
+    }
 }
 
 void LcdCarousel::show(
     uint8_t page,
     const DhtReading &dht,
-    const WaterTemperatureReading &water_temperature,
+    const WaterTemperatureReading *water_temperatures,
+    uint8_t water_temperature_count,
+    uint8_t water_temperature_index,
     const VemlReading &veml,
     const TdsReading &tds,
     bool level_present,
     bool flow_detected,
+    const Esp8266Diagnostic &wifi,
     float liters_per_minute,
     float total_liters
 ) {
@@ -78,8 +120,15 @@ void LcdCarousel::show(
             break;
 
         case 1:
-            format_water_temperature_line(line1, sizeof(line1), water_temperature);
-            snprintf(line2, sizeof(line2), "Sonda DS18B20");
+            if (water_temperature_count == 0 || water_temperatures == nullptr) {
+                WaterTemperatureReading missing = {false, false, WaterTemperatureStatus::device_missing, 0.0f};
+                format_water_temperature_line(line1, sizeof(line1), missing, 0);
+                snprintf(line2, sizeof(line2), "DS18B20 GP%u", config::WATER_TEMPERATURE_PIN);
+            } else {
+                uint8_t safe_index = water_temperature_index % water_temperature_count;
+                format_water_temperature_line(line1, sizeof(line1), water_temperatures[safe_index], safe_index);
+                snprintf(line2, sizeof(line2), "%u sonde GP%u", water_temperature_count, config::WATER_TEMPERATURE_PIN);
+            }
             break;
 
         case 2:
@@ -105,6 +154,11 @@ void LcdCarousel::show(
                 snprintf(line1, sizeof(line1), "TDS: attesa");
                 snprintf(line2, sizeof(line2), "ADC ERR");
             }
+            break;
+
+        case 5:
+            format_wifi_line(line1, sizeof(line1), wifi);
+            snprintf(line2, sizeof(line2), wifi.access_point_enabled ? "Raspberry WiFi" : "TX%u RX%u", config::ESP8266_UART_TX_PIN, config::ESP8266_UART_RX_PIN);
             break;
 
         default:

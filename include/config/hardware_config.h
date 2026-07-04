@@ -19,6 +19,8 @@ constexpr uint DHT_PIN = 5;
 constexpr uint VEML_SDA_PIN = 6;
 constexpr uint VEML_SCL_PIN = 7;
 constexpr uint WATER_TEMPERATURE_PIN = 8;
+constexpr uint ESP8266_UART_TX_PIN = 12;
+constexpr uint ESP8266_UART_RX_PIN = 13;
 constexpr uint TDS_ADC_PIN = 26;
 constexpr uint TDS_ADC_INPUT = 0;
 
@@ -37,6 +39,9 @@ constexpr uint32_t LCD_CAROUSEL_INTERVAL_MS = 3000;
 constexpr uint32_t MIN_PULSE_DISTANCE_US = 1000;
 constexpr uint32_t STARTUP_DIAGNOSTIC_SCREEN_MS = 650;
 constexpr uint I2C_OPERATION_TIMEOUT_US = 5000;
+constexpr uint32_t ESP8266_UART_BAUDRATE = 115200;
+constexpr const char *ESP8266_AP_SSID = "Raspberry WiFi Super Strong";
+constexpr uint8_t ESP8266_AP_CHANNEL = 6;
 
 constexpr bool ENABLE_STARTUP_DELAY = false;
 constexpr bool ENABLE_ONBOARD_LED_STARTUP = true;
@@ -45,6 +50,9 @@ constexpr bool ENABLE_LCD_DIAGNOSTIC = false;
 constexpr bool ENABLE_STARTUP_DIAGNOSTICS = true;
 constexpr bool ENABLE_SERIAL_LOG = true;
 constexpr bool ENABLE_WATER_TEMPERATURE_SENSOR = true;
+constexpr uint8_t MAX_WATER_TEMPERATURE_SENSORS = 4;
+constexpr bool ENABLE_ESP8266_WIFI = true;
+constexpr bool ENABLE_ESP8266_SOFT_AP = true;
 constexpr float PULSES_PER_LITER = 450.0f;
 constexpr float ADC_MAX_VALUE = 4095.0f;
 constexpr float PICO_ADC_REFERENCE_VOLTAGE = 3.3f;
@@ -67,5 +75,15 @@ constexpr uint8_t LCD_BACKLIGHT_ON = LCD_BACKLIGHT_ACTIVE_LOW ? 0x00 : LCD_BACKL
 constexpr uint8_t LCD_BACKLIGHT_OFF = LCD_BACKLIGHT_ACTIVE_LOW ? LCD_BACKLIGHT_BIT : 0x00;
 constexpr uint8_t LCD_ENABLE = 0x04;
 constexpr uint8_t LCD_RS = 0x01;
+
+static_assert(
+    ESP8266_UART_TX_PIN == 0 || ESP8266_UART_TX_PIN == 12 || ESP8266_UART_TX_PIN == 16,
+    "ESP8266_UART_TX_PIN must be a valid UART0 TX pin"
+);
+
+static_assert(
+    ESP8266_UART_RX_PIN == 1 || ESP8266_UART_RX_PIN == 13 || ESP8266_UART_RX_PIN == 17,
+    "ESP8266_UART_RX_PIN must be a valid UART0 RX pin"
+);
 
 }

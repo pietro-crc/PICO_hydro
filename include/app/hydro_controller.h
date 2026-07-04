@@ -1,6 +1,8 @@
 #pragma once
 
+#include "config/hardware_config.h"
 #include "drivers/lcd1602_i2c.h"
+#include "drivers/esp8266_at.h"
 #include "drivers/ws2812_strip.h"
 #include "sensors/ds18b20_sensor.h"
 #include "sensors/dht_sensor.h"
@@ -10,6 +12,8 @@
 #include "sensors/tds_sensor.h"
 #include "sensors/veml7700_sensor.h"
 #include "ui/lcd_carousel.h"
+
+#include <cstdint>
 
 namespace hydro {
 
@@ -32,6 +36,8 @@ private:
         VemlReading veml;
         DhtReading dht;
         WaterTemperatureReading water_temperature;
+        uint8_t water_temperature_sensor_count;
+        Esp8266Diagnostic wifi;
     };
 
     void init_gpio();
@@ -47,6 +53,7 @@ private:
     void blink_onboard_led_startup();
 
     Lcd1602I2c lcd_;
+    Esp8266At wifi_module_;
     Veml7700Sensor veml_sensor_;
     TdsSensor tds_sensor_;
     Ds18b20Sensor water_temperature_sensor_;
@@ -58,8 +65,12 @@ private:
 
     DhtReading dht_ = {false, 0.0f, 0.0f};
     WaterTemperatureReading water_temperature_ = {false, false, WaterTemperatureStatus::not_read, 0.0f};
+    WaterTemperatureReading water_temperatures_[config::MAX_WATER_TEMPERATURE_SENSORS] = {};
+    uint8_t water_temperature_count_ = 0;
+    uint8_t water_temperature_lcd_index_ = 0;
     VemlReading veml_ = {false, 0, 0.0f};
     TdsReading tds_ = {false, 0, 0.0f, 0.0f};
+    Esp8266Diagnostic wifi_ = {config::ENABLE_ESP8266_WIFI, false, false, false, false, 0, Esp8266Status::not_checked};
 
     float total_liters_ = 0.0f;
     float liters_per_minute_ = 0.0f;
