@@ -87,11 +87,23 @@ void LcdCarousel::format_wifi_line(char *line, size_t line_size, const Esp8266Di
         case Esp8266Status::firmware_ok:
             snprintf(line, line_size, "ESP: fw OK");
             break;
-        case Esp8266Status::ap_mode_ok:
-            snprintf(line, line_size, "AP: modo OK");
+        case Esp8266Status::wifi_join_ok:
+            snprintf(line, line_size, "WiFi casa OK");
             break;
-        case Esp8266Status::ap_ready:
-            snprintf(line, line_size, "AP: visibile");
+        case Esp8266Status::wifi_join_failed:
+            snprintf(line, line_size, "No WiFi casa");
+            break;
+        case Esp8266Status::ssl_open_ok:
+            snprintf(line, line_size, "SSL: OK");
+            break;
+        case Esp8266Status::ssl_failed:
+            snprintf(line, line_size, "SSL: ERR");
+            break;
+        case Esp8266Status::http_send_ok:
+            snprintf(line, line_size, "Cloud: OK");
+            break;
+        case Esp8266Status::http_send_failed:
+            snprintf(line, line_size, "Cloud: ERR");
             break;
     }
 }
@@ -127,7 +139,12 @@ void LcdCarousel::show(
             } else {
                 uint8_t safe_index = water_temperature_index % water_temperature_count;
                 format_water_temperature_line(line1, sizeof(line1), water_temperatures[safe_index], safe_index);
-                snprintf(line2, sizeof(line2), "%u sonde GP%u", water_temperature_count, config::WATER_TEMPERATURE_PIN);
+                if (water_temperature_count == 1) {
+                    snprintf(line2, sizeof(line2), "1 sonda GP%u", config::WATER_TEMPERATURE_PIN);
+                } else {
+                    uint8_t next_index = (safe_index + 1) % water_temperature_count;
+                    format_water_temperature_line(line2, sizeof(line2), water_temperatures[next_index], next_index);
+                }
             }
             break;
 
@@ -158,7 +175,25 @@ void LcdCarousel::show(
 
         case 5:
             format_wifi_line(line1, sizeof(line1), wifi);
-            snprintf(line2, sizeof(line2), wifi.access_point_enabled ? "Raspberry WiFi" : "TX%u RX%u", config::ESP8266_UART_TX_PIN, config::ESP8266_UART_RX_PIN);
+            if (wifi.status == Esp8266Status::wifi_join_failed) {
+                snprintf(line2, sizeof(line2), "AP:%s CW:%d", wifi.wifi_ap_seen ? "SI" : "NO", (int)wifi.wifi_join_error_code);
+            } else if (wifi.status == Esp8266Status::ssl_failed) {
+                if (!wifi.ssl_sni_ok) {
+                    snprintf(line2, sizeof(line2), "TLS SNI NO");
+                } else if (!wifi.ssl_dns_ok) {
+                    snprintf(line2, sizeof(line2), "TLS DNS NO");
+                } else if (wifi.ssl_errno != -1) {
+                    snprintf(line2, sizeof(line2), "TLS ERRNO %d", (int)wifi.ssl_errno);
+                } else {
+                    snprintf(line2, sizeof(line2), "TLS Google ERR");
+                }
+            } else if (wifi.status == Esp8266Status::http_send_failed) {
+                snprintf(line2, sizeof(line2), "HTTP Google ERR");
+            } else if (wifi.status == Esp8266Status::http_send_ok) {
+                snprintf(line2, sizeof(line2), "Google salvato");
+            } else {
+                snprintf(line2, sizeof(line2), "TX%u RX%u", config::ESP8266_UART_TX_PIN, config::ESP8266_UART_RX_PIN);
+            }
             break;
 
         default:

@@ -4,6 +4,13 @@
 
 #include <cstdint>
 
+#if __has_include("config/secrets.h")
+#include "config/secrets.h"
+#define HYDRO_HAS_SECRETS 1
+#else
+#define HYDRO_HAS_SECRETS 0
+#endif
+
 namespace hydro::config {
 
 constexpr const char *FIRMWARE_VERSION = "PICO Hydro 1.0";
@@ -36,12 +43,16 @@ constexpr uint32_t WATER_TEMPERATURE_READ_INTERVAL_MS = 5000;
 constexpr uint32_t WATER_TEMPERATURE_FIRST_READ_DELAY_MS = 1000;
 constexpr uint32_t WATER_TEMPERATURE_RETRY_DELAY_MS = 30000;
 constexpr uint32_t LCD_CAROUSEL_INTERVAL_MS = 3000;
+constexpr uint32_t SERIAL_SAMPLE_LOG_INTERVAL_MS = 60000;
+constexpr uint32_t HEALTH_LOG_INTERVAL_MS = 300000;
+constexpr uint32_t DHT_READING_STALE_MS = 30000;
+constexpr uint32_t VEML_READING_STALE_MS = 30000;
+constexpr uint32_t WATER_TEMPERATURE_STALE_MS = 300000;
+constexpr uint32_t GOOGLE_SHEETS_LOG_INTERVAL_MS = 60000;
 constexpr uint32_t MIN_PULSE_DISTANCE_US = 1000;
 constexpr uint32_t STARTUP_DIAGNOSTIC_SCREEN_MS = 650;
 constexpr uint I2C_OPERATION_TIMEOUT_US = 5000;
 constexpr uint32_t ESP8266_UART_BAUDRATE = 115200;
-constexpr const char *ESP8266_AP_SSID = "Raspberry WiFi Super Strong";
-constexpr uint8_t ESP8266_AP_CHANNEL = 6;
 
 constexpr bool ENABLE_STARTUP_DELAY = false;
 constexpr bool ENABLE_ONBOARD_LED_STARTUP = true;
@@ -52,7 +63,13 @@ constexpr bool ENABLE_SERIAL_LOG = true;
 constexpr bool ENABLE_WATER_TEMPERATURE_SENSOR = true;
 constexpr uint8_t MAX_WATER_TEMPERATURE_SENSORS = 4;
 constexpr bool ENABLE_ESP8266_WIFI = true;
-constexpr bool ENABLE_ESP8266_SOFT_AP = true;
+#if HYDRO_HAS_SECRETS
+constexpr bool ENABLE_GOOGLE_SHEETS_LOGGING = hydro::secrets::ENABLE_GOOGLE_SHEETS_LOGGING;
+constexpr const char *GOOGLE_SHEETS_WIFI_SSID = hydro::secrets::WIFI_SSID;
+#else
+constexpr bool ENABLE_GOOGLE_SHEETS_LOGGING = false;
+constexpr const char *GOOGLE_SHEETS_WIFI_SSID = "";
+#endif
 constexpr float PULSES_PER_LITER = 450.0f;
 constexpr float ADC_MAX_VALUE = 4095.0f;
 constexpr float PICO_ADC_REFERENCE_VOLTAGE = 3.3f;

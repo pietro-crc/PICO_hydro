@@ -31,6 +31,8 @@ include(pico_sdk_import.cmake)
 project(PICO_hydro C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
+set(PICO_MBEDTLS_CONFIG_FILE "hydro_mbedtls_config.h")
+set(PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS 5000)
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
@@ -38,6 +40,7 @@ pico_sdk_init()
 add_executable(PICO_hydro
         PICO_hydro.cpp
         src/app/hydro_controller.cpp
+        src/cloud/google_sheets_logger.cpp
         src/drivers/esp8266_at.cpp
         src/drivers/lcd1602_i2c.cpp
         src/drivers/ws2812_strip.cpp
@@ -60,10 +63,14 @@ pico_generate_pio_header(PICO_hydro ${CMAKE_CURRENT_LIST_DIR}/pio/ws2812.pio)
 pico_enable_stdio_uart(PICO_hydro 0)
 pico_enable_stdio_usb(PICO_hydro 1)
 
+target_compile_definitions(PICO_hydro PRIVATE
+        PICO_STACK_SIZE=0x1000)
+
 # Add the standard library to the build
 # hardware_adc serve per leggere il sensore TDS su GP26 / ADC0.
 target_link_libraries(PICO_hydro
         pico_stdlib
+        pico_mbedtls
         hardware_adc
         hardware_i2c
         hardware_pio
@@ -72,6 +79,7 @@ target_link_libraries(PICO_hydro
 # Add the standard include files to the build
 target_include_directories(PICO_hydro PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/include
+        ${CMAKE_CURRENT_LIST_DIR}/include/mbedtls_port
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
