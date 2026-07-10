@@ -47,6 +47,9 @@ void LcdCarousel::format_water_temperature_line(char *line, size_t line_size, co
             case WaterTemperatureStatus::invalid_data:
                 snprintf(line, line_size, "Acqua: dati err");
                 break;
+            case WaterTemperatureStatus::stale:
+                snprintf(line, line_size, "Acqua: scaduta");
+                break;
             case WaterTemperatureStatus::valid:
                 snprintf(line, line_size, "Acqua: errore");
                 break;
@@ -92,6 +95,12 @@ void LcdCarousel::format_wifi_line(char *line, size_t line_size, const Esp8266Di
             break;
         case Esp8266Status::wifi_join_failed:
             snprintf(line, line_size, "No WiFi casa");
+            break;
+        case Esp8266Status::clock_sync_failed:
+            snprintf(line, line_size, "NTP: errore");
+            break;
+        case Esp8266Status::tls_trust_store_missing:
+            snprintf(line, line_size, "TLS: config");
             break;
         case Esp8266Status::ssl_open_ok:
             snprintf(line, line_size, "SSL: OK");
@@ -149,7 +158,7 @@ void LcdCarousel::show(
             break;
 
         case 2:
-            snprintf(line1, sizeof(line1), "Livello: %s", level_present ? "OK" : "BASSO");
+            snprintf(line1, sizeof(line1), "Livello: %s", level_present ? "SI" : "BASSO");
             snprintf(line2, sizeof(line2), "Flusso: %s", flow_detected ? "SI" : "NO");
             break;
 

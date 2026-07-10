@@ -43,6 +43,7 @@ add_executable(PICO_hydro
         src/cloud/google_sheets_logger.cpp
         src/drivers/esp8266_at.cpp
         src/drivers/lcd1602_i2c.cpp
+        src/drivers/relay.cpp
         src/drivers/ws2812_strip.cpp
         src/sensors/ds18b20_sensor.cpp
         src/sensors/dht_sensor.cpp

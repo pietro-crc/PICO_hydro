@@ -28,12 +28,15 @@ constexpr uint VEML_SCL_PIN = 7;
 constexpr uint WATER_TEMPERATURE_PIN = 8;
 constexpr uint ESP8266_UART_TX_PIN = 12;
 constexpr uint ESP8266_UART_RX_PIN = 13;
+constexpr uint RELAY_PIN = 15;
 constexpr uint TDS_ADC_PIN = 26;
 constexpr uint TDS_ADC_INPUT = 0;
 
 constexpr bool DHT_SENSOR_IS_DHT11 = true;
 constexpr uint STRIP_LED_COUNT = 8;
 constexpr bool LEVEL_WATER_PRESENT_WHEN_HIGH = true;
+constexpr bool RELAY_ACTIVE_LOW = true;
+constexpr bool ENABLE_RELAY_TEST_LOOP = false;
 
 constexpr uint32_t SAMPLE_TIME_MS = 1000;
 constexpr uint32_t DHT_READ_INTERVAL_MS = 5000;
@@ -43,6 +46,7 @@ constexpr uint32_t WATER_TEMPERATURE_READ_INTERVAL_MS = 5000;
 constexpr uint32_t WATER_TEMPERATURE_FIRST_READ_DELAY_MS = 1000;
 constexpr uint32_t WATER_TEMPERATURE_RETRY_DELAY_MS = 30000;
 constexpr uint32_t LCD_CAROUSEL_INTERVAL_MS = 3000;
+constexpr uint32_t LCD_RECOVERY_INTERVAL_MS = 30000;
 constexpr uint32_t SERIAL_SAMPLE_LOG_INTERVAL_MS = 60000;
 constexpr uint32_t HEALTH_LOG_INTERVAL_MS = 300000;
 constexpr uint32_t DHT_READING_STALE_MS = 30000;
@@ -74,6 +78,8 @@ constexpr float PULSES_PER_LITER = 450.0f;
 constexpr float ADC_MAX_VALUE = 4095.0f;
 constexpr float PICO_ADC_REFERENCE_VOLTAGE = 3.3f;
 constexpr float TDS_TEMPERATURE_COMPENSATION_C = 25.0f;
+constexpr float TDS_COMPENSATION_MIN_TEMPERATURE_C = 0.0f;
+constexpr float TDS_COMPENSATION_MAX_TEMPERATURE_C = 50.0f;
 constexpr uint32_t DS18B20_CONVERSION_TIME_MS = 750;
 
 constexpr uint8_t VEML7700_ADDRESS = 0x10;

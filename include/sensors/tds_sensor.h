@@ -10,7 +10,7 @@ public:
     TdsSensor(uint adc_pin, uint adc_input);
 
     void init();
-    TdsReading read();
+    TdsReading read(float water_temperature_c);
 
 private:
     uint adc_pin_;

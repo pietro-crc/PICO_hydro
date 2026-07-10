@@ -11,6 +11,7 @@ enum class WaterTemperatureStatus : uint8_t {
     conversion_started,
     crc_error,
     invalid_data,
+    stale,
     valid
 };
 

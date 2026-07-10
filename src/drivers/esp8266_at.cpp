@@ -3,15 +3,31 @@
 #include "config/hardware_config.h"
 #include "pico/stdlib.h"
 
+#if __has_include("config/tls_trust_store.h")
+#include "config/tls_trust_store.h"
+#define HYDRO_HAS_TLS_TRUST_STORE 1
+#else
+#define HYDRO_HAS_TLS_TRUST_STORE 0
+#endif
+
+#if HYDRO_HAS_TLS_TRUST_STORE
+constexpr const char *GOOGLE_SCRIPT_TRUSTED_CA_PEM = hydro::trust::GOOGLE_SCRIPT_TRUSTED_CA_PEM;
+#else
+constexpr const char *GOOGLE_SCRIPT_TRUSTED_CA_PEM = "";
+#endif
+
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/error.h"
 #include "mbedtls/platform_time.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/timing.h"
+#include "mbedtls/x509_crt.h"
 
 #include <cstdio>
+#include <ctime>
 #include <cstring>
+#include <sys/time.h>
 
 extern "C" mbedtls_ms_time_t mbedtls_ms_time(void) {
     return (mbedtls_ms_time_t)to_ms_since_boot(get_absolute_time());
@@ -76,6 +92,10 @@ constexpr uint32_t ESP8266_TCP_TIMEOUT_MS = 12000;
 constexpr uint32_t ESP8266_TCP_QUERY_TIMEOUT_MS = 2500;
 constexpr uint32_t ESP8266_TLS_HANDSHAKE_TIMEOUT_MS = 35000;
 constexpr uint32_t ESP8266_TLS_RESPONSE_TIMEOUT_MS = 18000;
+constexpr uint32_t ESP8266_SNTP_COMMAND_TIMEOUT_MS = 2500;
+constexpr uint32_t ESP8266_SNTP_QUERY_TIMEOUT_MS = 2500;
+constexpr uint32_t ESP8266_SNTP_RETRY_DELAY_MS = 1000;
+constexpr uint8_t ESP8266_SNTP_MAX_ATTEMPTS = 8;
 constexpr uint32_t ESP8266_DRAIN_TIMEOUT_MS = 50;
 constexpr size_t ESP8266_TCP_SEND_CHUNK_SIZE = 768;
 constexpr size_t ESP8266_TCP_RECEIVE_CHUNK_SIZE = 768;
@@ -115,23 +135,126 @@ bool response_is_redirect(const char *response) {
 }
 
 bool response_is_google_success(const char *response) {
-    if (!response_has_status(response, "HTTP/1.1 200")) {
+    if (!response_has_status(response, "HTTP/1.1 200") &&
+        !response_has_status(response, "HTTP/1.0 200")) {
         return false;
     }
 
-    if (contains_text(response, "\"ok\":false") ||
-        contains_text(response, "\"ok\": false") ||
-        contains_text(response, "\"error\"")) {
+    const char *body = std::strstr(response, "\r\n\r\n");
+    if (body == nullptr) {
+        body = std::strstr(response, "\n\n");
+        if (body != nullptr) {
+            body += 2;
+        }
+    } else {
+        body += 4;
+    }
+
+    if (body == nullptr) {
         return false;
     }
 
-    return contains_text(response, "\"ok\":true") ||
-        contains_text(response, "\"ok\": true") ||
-        contains_text(response, "Content-Type: application/json");
+    return contains_text(body, "\"ok\":true") ||
+        contains_text(body, "\"ok\": true");
+}
+
+bool response_is_google_application_error(const char *response) {
+    const char *body = std::strstr(response, "\r\n\r\n");
+    if (body == nullptr) {
+        body = std::strstr(response, "\n\n");
+        if (body != nullptr) {
+            body += 2;
+        }
+    } else {
+        body += 4;
+    }
+
+    return body != nullptr &&
+        (contains_text(body, "\"ok\":false") ||
+            contains_text(body, "\"ok\": false") ||
+            contains_text(body, "\"error\""));
 }
 
 bool response_is_google_unauthorized(const char *response) {
     return response_has_status(response, "HTTP/1.1 401");
+}
+
+bool is_allowed_google_redirect_host(const char *host) {
+    return host != nullptr &&
+        (std::strcmp(host, "script.google.com") == 0 ||
+            std::strcmp(host, "script.googleusercontent.com") == 0);
+}
+
+bool is_leap_year(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+bool parse_esp_sntp_epoch(const char *response, time_t *epoch) {
+    if (response == nullptr || epoch == nullptr) {
+        return false;
+    }
+
+    const char *time_value = std::strstr(response, "+CIPSNTPTIME:");
+    if (time_value == nullptr) {
+        return false;
+    }
+    time_value += std::strlen("+CIPSNTPTIME:");
+
+    char month_name[4] = {};
+    int day = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    int year = 0;
+    if (std::sscanf(time_value, "%*3s %3s %d %d:%d:%d %d", month_name, &day, &hour, &minute, &second, &year) != 6) {
+        return false;
+    }
+
+    static constexpr const char *MONTHS[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    int month = -1;
+    for (int index = 0; index < 12; ++index) {
+        if (std::strncmp(month_name, MONTHS[index], 3) == 0) {
+            month = index;
+            break;
+        }
+    }
+
+    static constexpr int DAYS_PER_MONTH[] = {
+        31, 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31
+    };
+    if (month < 0 || year < 2024 || year > 2100 ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+        return false;
+    }
+
+    int days_in_month = DAYS_PER_MONTH[month];
+    if (month == 1 && is_leap_year(year)) {
+        days_in_month++;
+    }
+    if (day < 1 || day > days_in_month) {
+        return false;
+    }
+
+    uint64_t days_since_epoch = 0;
+    for (int current_year = 1970; current_year < year; ++current_year) {
+        days_since_epoch += is_leap_year(current_year) ? 366U : 365U;
+    }
+    for (int current_month = 0; current_month < month; ++current_month) {
+        days_since_epoch += DAYS_PER_MONTH[current_month];
+        if (current_month == 1 && is_leap_year(year)) {
+            days_since_epoch++;
+        }
+    }
+    days_since_epoch += (uint64_t)(day - 1);
+
+    uint64_t seconds_since_epoch = days_since_epoch * 86400U +
+        (uint64_t)hour * 3600U + (uint64_t)minute * 60U + (uint64_t)second;
+    *epoch = (time_t)seconds_since_epoch;
+    return *epoch > 0 && (uint64_t)*epoch == seconds_since_epoch;
 }
 
 bool extract_redirect_location(const char *response, char *host, size_t host_size, char *path, size_t path_size) {
@@ -304,6 +427,7 @@ Esp8266At::Esp8266At(uart_inst_t *uart, uint tx_pin, uint rx_pin)
 
 void Esp8266At::init(uint32_t baudrate) {
     baudrate_ = uart_init(uart_, baudrate);
+    clock_synchronized_ = false;
     gpio_set_function(tx_pin_, GPIO_FUNC_UART);
     gpio_set_function(rx_pin_, GPIO_FUNC_UART);
     gpio_pull_up(rx_pin_);
@@ -435,7 +559,61 @@ bool Esp8266At::join_wifi(const char *ssid, const char *password) {
     }
 
     last_status_ = Esp8266Status::wifi_join_ok;
+    clock_synchronized_ = false;
     return true;
+}
+
+bool Esp8266At::wifi_connected() {
+    char response[128];
+    if (!send_command_capture("AT+CWSTATE?", "OK", ESP8266_AT_TIMEOUT_MS, response, sizeof(response))) {
+        return false;
+    }
+
+    last_wifi_state_ = parse_prefixed_int(response, "+CWSTATE:");
+    return last_wifi_state_ == 2;
+}
+
+bool Esp8266At::synchronize_utc_clock() {
+    if (clock_synchronized_) {
+        return true;
+    }
+
+    if (!send_command(
+            "AT+CIPSNTPCFG=1,0,\"time.google.com\",\"pool.ntp.org\"",
+            "OK",
+            ESP8266_SNTP_COMMAND_TIMEOUT_MS)) {
+        last_status_ = Esp8266Status::clock_sync_failed;
+        return false;
+    }
+
+    for (uint8_t attempt = 0; attempt < ESP8266_SNTP_MAX_ATTEMPTS; ++attempt) {
+        char response[160];
+        if (send_command_capture(
+                "AT+CIPSNTPTIME?",
+                "OK",
+                ESP8266_SNTP_QUERY_TIMEOUT_MS,
+                response,
+                sizeof(response))) {
+            time_t epoch = 0;
+            if (parse_esp_sntp_epoch(response, &epoch)) {
+                timeval clock_time = {
+                    epoch,
+                    0
+                };
+                if (settimeofday(&clock_time, nullptr) == 0) {
+                    clock_synchronized_ = true;
+                    return true;
+                }
+            }
+        }
+
+        if (attempt + 1 < ESP8266_SNTP_MAX_ATTEMPTS) {
+            sleep_ms(ESP8266_SNTP_RETRY_DELAY_MS);
+        }
+    }
+
+    last_status_ = Esp8266Status::clock_sync_failed;
+    return false;
 }
 
 int16_t Esp8266At::last_wifi_join_error_code() const {
@@ -489,6 +667,20 @@ bool Esp8266At::post_https_json_pico_tls(const char *host, const char *path, con
         return false;
     }
 
+#if HYDRO_HAS_TLS_TRUST_STORE
+    if (GOOGLE_SCRIPT_TRUSTED_CA_PEM[0] == '\0') {
+        last_status_ = Esp8266Status::tls_trust_store_missing;
+        return false;
+    }
+#else
+    last_status_ = Esp8266Status::tls_trust_store_missing;
+    return false;
+#endif
+
+    if (!synchronize_utc_clock()) {
+        return false;
+    }
+
     static char request[1400];
     int request_length = std::snprintf(
         request,
@@ -498,6 +690,8 @@ bool Esp8266At::post_https_json_pico_tls(const char *host, const char *path, con
         "User-Agent: PICO-Hydro/1.0\r\n"
         "Content-Type: application/json\r\n"
         "Content-Length: %u\r\n"
+        "Accept: application/json\r\n"
+        "Accept-Encoding: identity\r\n"
         "Connection: close\r\n"
         "\r\n"
         "%s",
@@ -526,7 +720,8 @@ bool Esp8266At::post_https_json_pico_tls(const char *host, const char *path, con
     if (response_is_redirect(response)) {
         static char redirect_host[80];
         static char redirect_path[768];
-        if (extract_redirect_location(response, redirect_host, sizeof(redirect_host), redirect_path, sizeof(redirect_path))) {
+        if (extract_redirect_location(response, redirect_host, sizeof(redirect_host), redirect_path, sizeof(redirect_path)) &&
+            is_allowed_google_redirect_host(redirect_host)) {
             static char redirect_request[1000];
             int redirect_request_length = std::snprintf(
                 redirect_request,
@@ -593,16 +788,22 @@ bool Esp8266At::send_pico_tls_http_request(
     bool handshake_done = false;
     bool received_http = false;
     int ret = 0;
+    TlsStreamContext stream = {
+        this,
+        0
+    };
     set_transport_error(Esp8266TransportError::none, 0);
 
     static mbedtls_ssl_context ssl;
     static mbedtls_ssl_config conf;
     static mbedtls_ctr_drbg_context ctr_drbg;
     static mbedtls_entropy_context entropy;
+    static mbedtls_x509_crt trusted_ca;
     mbedtls_ssl_init(&ssl);
     mbedtls_ssl_config_init(&conf);
     mbedtls_ctr_drbg_init(&ctr_drbg);
     mbedtls_entropy_init(&entropy);
+    mbedtls_x509_crt_init(&trusted_ca);
 
     if (!open_tcp(host, 443)) {
         goto cleanup;
@@ -637,7 +838,20 @@ bool Esp8266At::send_pico_tls_http_request(
         goto cleanup;
     }
 
-    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_NONE);
+    ret = mbedtls_x509_crt_parse(
+        &trusted_ca,
+        reinterpret_cast<const unsigned char *>(GOOGLE_SCRIPT_TRUSTED_CA_PEM),
+        std::strlen(GOOGLE_SCRIPT_TRUSTED_CA_PEM) + 1U
+    );
+    if (ret != 0) {
+        last_ssl_errno_ = (int16_t)ret;
+        last_status_ = Esp8266Status::ssl_failed;
+        goto cleanup;
+    }
+
+    mbedtls_ssl_conf_ca_chain(&conf, &trusted_ca, nullptr);
+    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_min_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
     mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
 
     ret = mbedtls_ssl_setup(&ssl, &conf);
@@ -655,10 +869,7 @@ bool Esp8266At::send_pico_tls_http_request(
     }
 
     {
-        TlsStreamContext stream = {
-            this,
-            to_ms_since_boot(get_absolute_time()) + ESP8266_TLS_HANDSHAKE_TIMEOUT_MS
-        };
+        stream.receive_deadline_ms = to_ms_since_boot(get_absolute_time()) + ESP8266_TLS_HANDSHAKE_TIMEOUT_MS;
         mbedtls_ssl_set_bio(&ssl, &stream, tls_send_callback, tls_recv_callback, nullptr);
 
         while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
@@ -678,6 +889,14 @@ bool Esp8266At::send_pico_tls_http_request(
             goto cleanup;
         }
 
+        if (mbedtls_ssl_get_verify_result(&ssl) != 0) {
+            ret = MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
+            last_ssl_errno_ = (int16_t)ret;
+            last_status_ = Esp8266Status::ssl_failed;
+            goto cleanup;
+        }
+
+        last_ssl_sni_ok_ = true;
         handshake_done = true;
         last_status_ = Esp8266Status::ssl_open_ok;
 
@@ -720,6 +939,7 @@ bool Esp8266At::send_pico_tls_http_request(
                 }
 
                 if (response_is_google_success(response) ||
+                    response_is_google_application_error(response) ||
                     (response_is_redirect(response) && contains_text(response, "\r\n\r\n"))) {
                     break;
                 }
@@ -764,6 +984,7 @@ cleanup:
     mbedtls_ssl_config_free(&conf);
     mbedtls_ctr_drbg_free(&ctr_drbg);
     mbedtls_entropy_free(&entropy);
+    mbedtls_x509_crt_free(&trusted_ca);
 
     if (connected) {
         close_connection();
@@ -789,7 +1010,7 @@ bool Esp8266At::open_tcp(const char *host, uint16_t port) {
     }
 
     last_ssl_dns_ok_ = false;
-    last_ssl_sni_ok_ = true;
+    last_ssl_sni_ok_ = false;
     last_ssl_errno_ = -1;
     set_transport_error(Esp8266TransportError::none, 0);
 

@@ -33,6 +33,11 @@ void flow_sensor_callback(uint gpio, uint32_t events) {
 FlowMeter::FlowMeter(uint pin) : pin_(pin) {}
 
 void FlowMeter::init() {
+    uint32_t interrupt_state = save_and_disable_interrupts();
+    flow_pulse_count = 0;
+    last_pulse_us = 0;
+    restore_interrupts(interrupt_state);
+
     active_flow_pin = pin_;
     gpio_init(pin_);
     gpio_set_dir(pin_, GPIO_IN);

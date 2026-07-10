@@ -1,5 +1,6 @@
 build/
 include/config/secrets.h
+include/config/tls_trust_store.h
 *.bin
 *.dis
 *.elf

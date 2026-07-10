@@ -16,12 +16,17 @@ uint8_t Lcd1602I2c::address() const {
 }
 
 bool Lcd1602I2c::write(uint8_t value) {
-    if (address_ == 0) {
+    if (!available_ || address_ == 0) {
         return false;
     }
 
     int result = i2c_write_timeout_us(i2c_, address_, &value, 1, false, config::I2C_OPERATION_TIMEOUT_US);
-    return result == 1;
+    if (result != 1) {
+        available_ = false;
+        return false;
+    }
+
+    return true;
 }
 
 void Lcd1602I2c::pulse_enable(uint8_t value) {
@@ -123,6 +128,8 @@ bool Lcd1602I2c::init() {
         return false;
     }
 
+    available_ = true;
+
     sleep_ms(50);
 
     write4(0x30, 0);
@@ -139,8 +146,7 @@ bool Lcd1602I2c::init() {
     command(0x06);
     command(0x01);
 
-    available_ = true;
-    return true;
+    return available_;
 }
 
 }

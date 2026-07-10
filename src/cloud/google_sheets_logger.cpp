@@ -79,8 +79,11 @@ bool GoogleSheetsLogger::send(const HydroTelemetry &telemetry) {
     }
 
 #if HYDRO_HAS_GOOGLE_SECRETS
-    if (!initialized_ && !init()) {
-        return false;
+    if (!initialized_ || !wifi_->wifi_connected()) {
+        initialized_ = false;
+        if (!init()) {
+            return false;
+        }
     }
 
     static char payload[TELEMETRY_PAYLOAD_SIZE];
@@ -94,9 +97,8 @@ bool GoogleSheetsLogger::send(const HydroTelemetry &telemetry) {
         payload
     );
 
-    if (!sent) {
-        initialized_ = wifi_->last_status() != Esp8266Status::wifi_join_failed &&
-            wifi_->last_status() != Esp8266Status::uart_timeout;
+    if (!sent && !wifi_->wifi_connected()) {
+        initialized_ = false;
     }
 
     return sent;

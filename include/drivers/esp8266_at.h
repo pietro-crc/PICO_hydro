@@ -17,6 +17,8 @@ enum class Esp8266Status : uint8_t {
     firmware_ok,
     wifi_join_ok,
     wifi_join_failed,
+    clock_sync_failed,
+    tls_trust_store_missing,
     ssl_open_ok,
     ssl_failed,
     http_send_ok,
@@ -59,6 +61,7 @@ public:
     void init(uint32_t baudrate);
     Esp8266Diagnostic run_startup_diagnostic();
     bool join_wifi(const char *ssid, const char *password);
+    bool wifi_connected();
     bool post_https_json(const char *host, const char *path, const char *payload);
     void close_connection();
     Esp8266Status last_status() const;
@@ -73,6 +76,7 @@ public:
 
 private:
     bool probe_at(uint32_t baudrate);
+    bool synchronize_utc_clock();
     bool post_https_json_pico_tls(const char *host, const char *path, const char *payload);
     bool send_pico_tls_http_request(const char *host, const char *request, size_t request_length, char *response, size_t response_size);
     bool open_tcp(const char *host, uint16_t port);
@@ -111,6 +115,7 @@ private:
     Esp8266TransportError last_transport_error_ = Esp8266TransportError::none;
     uint32_t last_transport_detail_ = 0;
     Esp8266Status last_status_ = Esp8266Status::not_checked;
+    bool clock_synchronized_ = false;
 };
 
 }
