@@ -2,6 +2,7 @@
 
 #include "config/hardware_config.h"
 #include "pico/stdlib.h"
+#include "runtime/runtime_watchdog.h"
 
 namespace hydro {
 
@@ -92,16 +93,16 @@ void Lcd1602I2c::diagnostic_test() {
 
     for (uint i = 0; i < 3; ++i) {
         write(config::LCD_BACKLIGHT_OFF);
-        sleep_ms(300);
+        runtime::sleep_ms_guarded(300);
         write(config::LCD_BACKLIGHT_ON);
-        sleep_ms(300);
+        runtime::sleep_ms_guarded(300);
     }
 
     show_lines("LCD TEST 123456", "8888888888888888");
-    sleep_ms(8000);
+    runtime::sleep_ms_guarded(8000);
 
     show_lines("ABCDEFGHIJKLMNOP", "0123456789ABCDEF");
-    sleep_ms(5000);
+    runtime::sleep_ms_guarded(5000);
 
     command(0x01);
     sleep_ms(2);

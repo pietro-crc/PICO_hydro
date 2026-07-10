@@ -2,6 +2,7 @@
 
 #include "config/hardware_config.h"
 #include "pico/stdlib.h"
+#include "runtime/runtime_watchdog.h"
 #include "ws2812.pio.h"
 
 namespace hydro {
@@ -46,9 +47,9 @@ void Ws2812Strip::set_flow_and_level(uint32_t flow_color, uint32_t level_color) 
 void Ws2812Strip::test_startup() {
     for (uint i = 0; i < 3; ++i) {
         set_all(ws2812_color(0, 0, 40));
-        sleep_ms(300);
+        runtime::sleep_ms_guarded(300);
         set_all(ws2812_color(0, 0, 0));
-        sleep_ms(300);
+        runtime::sleep_ms_guarded(300);
     }
 }
 

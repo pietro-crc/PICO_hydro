@@ -75,7 +75,8 @@ target_link_libraries(PICO_hydro
         hardware_adc
         hardware_i2c
         hardware_pio
-        hardware_uart)
+        hardware_uart
+        hardware_watchdog)
 
 # Add the standard include files to the build
 target_include_directories(PICO_hydro PRIVATE

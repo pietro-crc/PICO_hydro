@@ -2,6 +2,7 @@
 
 #include "config/hardware_config.h"
 #include "pico/stdlib.h"
+#include "runtime/runtime_watchdog.h"
 
 #if __has_include("config/tls_trust_store.h")
 #include "config/tls_trust_store.h"
@@ -96,6 +97,7 @@ constexpr uint32_t ESP8266_SNTP_COMMAND_TIMEOUT_MS = 2500;
 constexpr uint32_t ESP8266_SNTP_QUERY_TIMEOUT_MS = 2500;
 constexpr uint32_t ESP8266_SNTP_RETRY_DELAY_MS = 1000;
 constexpr uint8_t ESP8266_SNTP_MAX_ATTEMPTS = 8;
+constexpr uint32_t ESP8266_CLOCK_RESYNC_INTERVAL_MS = 6U * 60U * 60U * 1000U;
 constexpr uint32_t ESP8266_DRAIN_TIMEOUT_MS = 50;
 constexpr size_t ESP8266_TCP_SEND_CHUNK_SIZE = 768;
 constexpr size_t ESP8266_TCP_RECEIVE_CHUNK_SIZE = 768;
@@ -179,34 +181,65 @@ bool response_is_google_unauthorized(const char *response) {
     return response_has_status(response, "HTTP/1.1 401");
 }
 
+const char *http_response_body(const char *response) {
+    if (response == nullptr) {
+        return nullptr;
+    }
+
+    const char *body = std::strstr(response, "\r\n\r\n");
+    if (body != nullptr) {
+        return body + 4;
+    }
+
+    body = std::strstr(response, "\n\n");
+    return body == nullptr ? nullptr : body + 2;
+}
+
 bool is_allowed_google_redirect_host(const char *host) {
     return host != nullptr &&
         (std::strcmp(host, "script.google.com") == 0 ||
             std::strcmp(host, "script.googleusercontent.com") == 0);
 }
 
+bool wifi_query_reports_connection(const char *response, const char *expected_ssid) {
+    if (response == nullptr) {
+        return false;
+    }
+
+    const char *connection = std::strstr(response, "+CWJAP:");
+    if (connection == nullptr || expected_ssid == nullptr) {
+        return connection != nullptr;
+    }
+
+    const char *ssid_start = std::strchr(connection, '"');
+    if (ssid_start == nullptr) {
+        return false;
+    }
+    ssid_start++;
+
+    const char *ssid_end = std::strchr(ssid_start, '"');
+    if (ssid_end == nullptr) {
+        return false;
+    }
+
+    const size_t ssid_length = (size_t)(ssid_end - ssid_start);
+    return ssid_length == std::strlen(expected_ssid) &&
+        std::strncmp(ssid_start, expected_ssid, ssid_length) == 0;
+}
+
 bool is_leap_year(int year) {
     return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
 }
 
-bool parse_esp_sntp_epoch(const char *response, time_t *epoch) {
-    if (response == nullptr || epoch == nullptr) {
-        return false;
-    }
-
-    const char *time_value = std::strstr(response, "+CIPSNTPTIME:");
-    if (time_value == nullptr) {
-        return false;
-    }
-    time_value += std::strlen("+CIPSNTPTIME:");
-
-    char month_name[4] = {};
-    int day = 0;
-    int hour = 0;
-    int minute = 0;
-    int second = 0;
-    int year = 0;
-    if (std::sscanf(time_value, "%*3s %3s %d %d:%d:%d %d", month_name, &day, &hour, &minute, &second, &year) != 6) {
+bool calendar_to_epoch(
+    const char *month_name,
+    int day,
+    int hour,
+    int minute,
+    int second,
+    int year,
+    time_t *epoch) {
+    if (month_name == nullptr || epoch == nullptr) {
         return false;
     }
 
@@ -255,6 +288,45 @@ bool parse_esp_sntp_epoch(const char *response, time_t *epoch) {
         (uint64_t)hour * 3600U + (uint64_t)minute * 60U + (uint64_t)second;
     *epoch = (time_t)seconds_since_epoch;
     return *epoch > 0 && (uint64_t)*epoch == seconds_since_epoch;
+}
+
+bool parse_esp_sntp_epoch(const char *response, time_t *epoch) {
+    if (response == nullptr || epoch == nullptr) {
+        return false;
+    }
+
+    const char *time_value = std::strstr(response, "+CIPSNTPTIME:");
+    if (time_value == nullptr) {
+        return false;
+    }
+    time_value += std::strlen("+CIPSNTPTIME:");
+
+    char month_name[4] = {};
+    int day = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    int year = 0;
+    if (std::sscanf(time_value, "%*3s %3s %d %d:%d:%d %d", month_name, &day, &hour, &minute, &second, &year) != 6) {
+        return false;
+    }
+
+    return calendar_to_epoch(month_name, day, hour, minute, second, year, epoch);
+}
+
+bool build_timestamp_epoch(time_t *epoch) {
+    char month_name[4] = {};
+    int day = 0;
+    int year = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    if (std::sscanf(__DATE__, "%3s %d %d", month_name, &day, &year) != 3 ||
+        std::sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second) != 3) {
+        return false;
+    }
+
+    return calendar_to_epoch(month_name, day, hour, minute, second, year, epoch);
 }
 
 bool extract_redirect_location(const char *response, char *host, size_t host_size, char *path, size_t path_size) {
@@ -397,7 +469,8 @@ bool match_prefix_token(uart_inst_t *uart, const char *token, uint64_t deadline_
 
     while (to_ms_since_boot(get_absolute_time()) < deadline_ms) {
         if (!uart_is_readable(uart)) {
-            tight_loop_contents();
+            runtime::feed_watchdog();
+            sleep_us(100);
             continue;
         }
 
@@ -486,7 +559,7 @@ Esp8266Diagnostic Esp8266At::run_startup_diagnostic() {
     }
 
     (void)send_command_allow_error("AT+SYSSTORE=0", "OK", ESP8266_AT_TIMEOUT_MS);
-    (void)send_command_allow_error("AT+SYSLOG=1", "OK", ESP8266_AT_TIMEOUT_MS);
+    (void)send_command_allow_error("AT+SYSLOG=0", "OK", ESP8266_AT_TIMEOUT_MS);
 
     return diagnostic;
 }
@@ -527,17 +600,15 @@ bool Esp8266At::join_wifi(const char *ssid, const char *password) {
     (void)send_command_allow_error("AT+CIPMODE=0", "OK", ESP8266_AT_TIMEOUT_MS);
     (void)send_command_allow_error("AT+CIPDINFO=0", "OK", ESP8266_AT_TIMEOUT_MS);
     (void)send_command_allow_error("AT+CIPRECVMODE=0", "OK", ESP8266_AT_TIMEOUT_MS);
-    (void)send_command_allow_error("AT+CWAUTOCONN=0", "OK", ESP8266_AT_TIMEOUT_MS);
-    (void)send_command_allow_error("AT+CWQAP", "OK", ESP8266_AT_TIMEOUT_MS);
     (void)send_command_allow_error("AT+CWDHCP=1,1", "OK", ESP8266_AT_TIMEOUT_MS);
 
-    char scan_command[96];
-    int scan_length = std::snprintf(scan_command, sizeof(scan_command), "AT+CWLAP=\"%s\"", ssid);
-    if (scan_length > 0 && (size_t)scan_length < sizeof(scan_command)) {
-        char scan_response[256];
-        if (send_command_capture(scan_command, "OK", ESP8266_WIFI_JOIN_TIMEOUT_MS, scan_response, sizeof(scan_response))) {
-            last_wifi_ap_seen_ = std::strstr(scan_response, "+CWLAP:") != nullptr;
-        }
+    char joined_response[192];
+    if (send_command_capture("AT+CWJAP?", "OK", ESP8266_AT_TIMEOUT_MS, joined_response, sizeof(joined_response)) &&
+        wifi_query_reports_connection(joined_response, ssid)) {
+        last_wifi_state_ = 2;
+        last_wifi_ap_seen_ = true;
+        last_status_ = Esp8266Status::wifi_join_ok;
+        return true;
     }
 
     char command[160];
@@ -550,9 +621,11 @@ bool Esp8266At::join_wifi(const char *ssid, const char *password) {
     char response[256];
     if (!send_command_capture(command, "OK", ESP8266_WIFI_JOIN_TIMEOUT_MS, response, sizeof(response))) {
         last_wifi_join_error_code_ = parse_prefixed_int(response, "+CWJAP:");
-        char state_response[128];
-        if (send_command_capture("AT+CWSTATE?", "OK", ESP8266_AT_TIMEOUT_MS, state_response, sizeof(state_response))) {
-            last_wifi_state_ = parse_prefixed_int(state_response, "+CWSTATE:");
+        if (wifi_connected()) {
+            last_wifi_ap_seen_ = true;
+            last_status_ = Esp8266Status::wifi_join_ok;
+            clock_synchronized_ = false;
+            return true;
         }
         last_status_ = Esp8266Status::wifi_join_failed;
         return false;
@@ -565,51 +638,84 @@ bool Esp8266At::join_wifi(const char *ssid, const char *password) {
 
 bool Esp8266At::wifi_connected() {
     char response[128];
-    if (!send_command_capture("AT+CWSTATE?", "OK", ESP8266_AT_TIMEOUT_MS, response, sizeof(response))) {
-        return false;
+    if (send_command_capture("AT+CWSTATE?", "OK", ESP8266_AT_TIMEOUT_MS, response, sizeof(response))) {
+        last_wifi_state_ = parse_prefixed_int(response, "+CWSTATE:");
+        if (last_wifi_state_ == 2) {
+            return true;
+        }
     }
 
-    last_wifi_state_ = parse_prefixed_int(response, "+CWSTATE:");
-    return last_wifi_state_ == 2;
-}
-
-bool Esp8266At::synchronize_utc_clock() {
-    if (clock_synchronized_) {
+    char joined_response[192];
+    if (send_command_capture("AT+CWJAP?", "OK", ESP8266_AT_TIMEOUT_MS, joined_response, sizeof(joined_response)) &&
+        wifi_query_reports_connection(joined_response, nullptr)) {
+        last_wifi_state_ = 2;
         return true;
     }
 
-    if (!send_command(
-            "AT+CIPSNTPCFG=1,0,\"time.google.com\",\"pool.ntp.org\"",
-            "OK",
-            ESP8266_SNTP_COMMAND_TIMEOUT_MS)) {
-        last_status_ = Esp8266Status::clock_sync_failed;
-        return false;
+    return false;
+}
+
+bool Esp8266At::synchronize_utc_clock() {
+    const uint64_t now_ms = to_ms_since_boot(get_absolute_time());
+    if (clock_synchronized_ &&
+        now_ms - last_clock_sync_ms_ < ESP8266_CLOCK_RESYNC_INTERVAL_MS) {
+        return true;
     }
 
-    for (uint8_t attempt = 0; attempt < ESP8266_SNTP_MAX_ATTEMPTS; ++attempt) {
-        char response[160];
-        if (send_command_capture(
-                "AT+CIPSNTPTIME?",
-                "OK",
-                ESP8266_SNTP_QUERY_TIMEOUT_MS,
-                response,
-                sizeof(response))) {
-            time_t epoch = 0;
-            if (parse_esp_sntp_epoch(response, &epoch)) {
-                timeval clock_time = {
-                    epoch,
-                    0
-                };
-                if (settimeofday(&clock_time, nullptr) == 0) {
-                    clock_synchronized_ = true;
-                    return true;
+    static constexpr const char *SNTP_CONFIG_COMMANDS[] = {
+        "AT+CIPSNTPCFG=1,0,\"time.google.com\",\"pool.ntp.org\"",
+        "AT+CIPSNTPCFG=1,0,\"time.google.com\"",
+        "AT+CIPSNTPCFG=1,0"
+    };
+    bool sntp_configured = false;
+    for (const char *command : SNTP_CONFIG_COMMANDS) {
+        if (send_command(command, "OK", ESP8266_SNTP_COMMAND_TIMEOUT_MS)) {
+            sntp_configured = true;
+            break;
+        }
+    }
+
+    if (sntp_configured) {
+        for (uint8_t attempt = 0; attempt < ESP8266_SNTP_MAX_ATTEMPTS; ++attempt) {
+            char response[160];
+            if (send_command_capture(
+                    "AT+CIPSNTPTIME?",
+                    "OK",
+                    ESP8266_SNTP_QUERY_TIMEOUT_MS,
+                    response,
+                    sizeof(response))) {
+                time_t epoch = 0;
+                if (parse_esp_sntp_epoch(response, &epoch)) {
+                    timeval clock_time = {epoch, 0};
+                    if (settimeofday(&clock_time, nullptr) == 0) {
+                        clock_synchronized_ = true;
+                        last_clock_sync_ms_ = now_ms;
+                        return true;
+                    }
                 }
             }
-        }
 
-        if (attempt + 1 < ESP8266_SNTP_MAX_ATTEMPTS) {
-            sleep_ms(ESP8266_SNTP_RETRY_DELAY_MS);
+            if (attempt + 1 < ESP8266_SNTP_MAX_ATTEMPTS) {
+                runtime::sleep_ms_guarded(ESP8266_SNTP_RETRY_DELAY_MS);
+            }
         }
+    }
+
+    time_t build_epoch = 0;
+    if (build_timestamp_epoch(&build_epoch)) {
+        timeval clock_time = {build_epoch, 0};
+        if (settimeofday(&clock_time, nullptr) == 0) {
+            clock_synchronized_ = true;
+            if (config::ENABLE_SERIAL_LOG) {
+                std::printf("Clock SNTP non disponibile: uso timestamp build per TLS\n");
+            }
+            last_clock_sync_ms_ = now_ms;
+            return true;
+        }
+    }
+
+    if (clock_synchronized_) {
+        return true;
     }
 
     last_status_ = Esp8266Status::clock_sync_failed;
@@ -729,6 +835,8 @@ bool Esp8266At::post_https_json_pico_tls(const char *host, const char *path, con
                 "GET %s HTTP/1.1\r\n"
                 "Host: %s\r\n"
                 "User-Agent: PICO-Hydro/1.0\r\n"
+                "Accept: application/json\r\n"
+                "Accept-Encoding: identity\r\n"
                 "Connection: close\r\n"
                 "\r\n",
                 redirect_path,
@@ -750,7 +858,11 @@ bool Esp8266At::post_https_json_pico_tls(const char *host, const char *path, con
                 }
 
                 if (config::ENABLE_SERIAL_LOG) {
-                    printf("Pico TLS Google redirect response: %.180s\n", redirect_response);
+                    const char *body = http_response_body(redirect_response);
+                    printf(
+                        "Pico TLS Google redirect response body: %.180s\n",
+                        body == nullptr ? "<missing>" : body
+                    );
                 }
             }
         } else if (config::ENABLE_SERIAL_LOG) {
@@ -880,7 +992,8 @@ bool Esp8266At::send_pico_tls_http_request(
                 ret = MBEDTLS_ERR_SSL_TIMEOUT;
                 break;
             }
-            tight_loop_contents();
+            runtime::feed_watchdog();
+            sleep_us(100);
         }
 
         if (ret != 0) {
@@ -912,7 +1025,8 @@ bool Esp8266At::send_pico_tls_http_request(
                 continue;
             }
             if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-                tight_loop_contents();
+                runtime::feed_watchdog();
+                sleep_us(100);
                 continue;
             }
 
@@ -950,7 +1064,8 @@ bool Esp8266At::send_pico_tls_http_request(
                 break;
             }
             if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-                tight_loop_contents();
+                runtime::feed_watchdog();
+                sleep_us(100);
                 continue;
             }
 
@@ -1111,6 +1226,7 @@ int Esp8266At::tcp_recv_bytes(unsigned char *buffer, size_t length, uint64_t dea
     }
 
     while (to_ms_since_boot(get_absolute_time()) < deadline_ms) {
+        runtime::feed_watchdog();
         size_t available = tcp_available_bytes();
         if (available > 0) {
             size_t request_length = available;
@@ -1130,6 +1246,7 @@ int Esp8266At::tcp_recv_bytes(unsigned char *buffer, size_t length, uint64_t dea
             }
         }
 
+        runtime::feed_watchdog();
         sleep_ms(10);
     }
 
@@ -1215,7 +1332,8 @@ bool Esp8266At::tcp_receive_passive_with_command(
     bool prefix_separator_seen = false;
     while (to_ms_since_boot(get_absolute_time()) < deadline_ms) {
         if (!uart_is_readable(uart_)) {
-            tight_loop_contents();
+            runtime::feed_watchdog();
+            sleep_us(100);
             continue;
         }
 
@@ -1242,7 +1360,8 @@ bool Esp8266At::tcp_receive_passive_with_command(
     bool header_done = false;
     while (to_ms_since_boot(get_absolute_time()) < deadline_ms) {
         if (!uart_is_readable(uart_)) {
-            tight_loop_contents();
+            runtime::feed_watchdog();
+            sleep_us(100);
             continue;
         }
 
@@ -1275,7 +1394,8 @@ bool Esp8266At::tcp_receive_passive_with_command(
     size_t copied = 0;
     while (copied < copy_length && to_ms_since_boot(get_absolute_time()) < deadline_ms) {
         if (!uart_is_readable(uart_)) {
-            tight_loop_contents();
+            runtime::feed_watchdog();
+            sleep_us(100);
             continue;
         }
 
@@ -1290,7 +1410,8 @@ bool Esp8266At::tcp_receive_passive_with_command(
     size_t discarded = copied;
     while (discarded < actual_length && to_ms_since_boot(get_absolute_time()) < deadline_ms) {
         if (!uart_is_readable(uart_)) {
-            tight_loop_contents();
+            runtime::feed_watchdog();
+            sleep_us(100);
             continue;
         }
 
@@ -1304,7 +1425,8 @@ bool Esp8266At::tcp_receive_passive_with_command(
     uint64_t ok_deadline_ms = to_ms_since_boot(get_absolute_time()) + ESP8266_TCP_QUERY_TIMEOUT_MS;
     while (to_ms_since_boot(get_absolute_time()) < ok_deadline_ms) {
         if (!uart_is_readable(uart_)) {
-            tight_loop_contents();
+            runtime::feed_watchdog();
+            sleep_us(100);
             continue;
         }
 
@@ -1415,7 +1537,8 @@ bool Esp8266At::read_until_any(const char *expected_a, const char *expected_b, u
             }
         }
 
-        tight_loop_contents();
+        runtime::feed_watchdog();
+        sleep_us(100);
     }
 
     return false;

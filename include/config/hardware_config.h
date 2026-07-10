@@ -35,7 +35,7 @@ constexpr uint TDS_ADC_INPUT = 0;
 constexpr bool DHT_SENSOR_IS_DHT11 = true;
 constexpr uint STRIP_LED_COUNT = 8;
 constexpr bool LEVEL_WATER_PRESENT_WHEN_HIGH = true;
-constexpr bool RELAY_ACTIVE_LOW = true;
+constexpr bool RELAY_ACTIVE_LOW = false;
 constexpr bool ENABLE_RELAY_TEST_LOOP = false;
 
 constexpr uint32_t SAMPLE_TIME_MS = 1000;
@@ -57,6 +57,10 @@ constexpr uint32_t MIN_PULSE_DISTANCE_US = 1000;
 constexpr uint32_t STARTUP_DIAGNOSTIC_SCREEN_MS = 650;
 constexpr uint I2C_OPERATION_TIMEOUT_US = 5000;
 constexpr uint32_t ESP8266_UART_BAUDRATE = 115200;
+constexpr bool ENABLE_HARDWARE_WATCHDOG = true;
+constexpr uint32_t HARDWARE_WATCHDOG_TIMEOUT_MS = 8000;
+constexpr uint32_t ESP8266_REPROBE_INTERVAL_MS = 300000;
+constexpr uint32_t GOOGLE_SHEETS_RETRY_MAX_INTERVAL_MS = 900000;
 
 constexpr bool ENABLE_STARTUP_DELAY = false;
 constexpr bool ENABLE_ONBOARD_LED_STARTUP = true;

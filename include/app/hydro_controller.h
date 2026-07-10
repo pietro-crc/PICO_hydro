@@ -53,7 +53,7 @@ private:
     float tds_compensation_temperature_c() const;
     void invalidate_water_temperature_cache(WaterTemperatureStatus status);
     void log_sample(bool level_present, bool flow_detected, float liters_per_minute) const;
-    void send_remote_log(uint64_t now_ms, bool level_present);
+    bool send_remote_log(uint64_t now_ms, bool level_present);
     void expire_stale_readings(uint64_t now_ms);
     void blink_onboard_led_startup();
 
@@ -102,6 +102,8 @@ private:
     uint64_t water_temperature_last_ok_ms_ = 0;
     uint64_t flow_sample_started_ms_ = 0;
     uint64_t next_remote_log_ms_ = config::GOOGLE_SHEETS_LOG_INTERVAL_MS;
+    uint64_t next_wifi_reprobe_ms_ = config::ESP8266_REPROBE_INTERVAL_MS;
+    uint32_t remote_log_failure_streak_ = 0;
     bool heartbeat_state_ = false;
     bool flow_detected_ = false;
     bool water_temperature_conversion_pending_ = false;

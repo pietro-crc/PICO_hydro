@@ -116,6 +116,7 @@ private:
     uint32_t last_transport_detail_ = 0;
     Esp8266Status last_status_ = Esp8266Status::not_checked;
     bool clock_synchronized_ = false;
+    uint64_t last_clock_sync_ms_ = 0;
 };
 
 }
