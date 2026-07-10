@@ -91,6 +91,7 @@ constexpr uint32_t ESP8266_WIFI_JOIN_TIMEOUT_MS = 25000;
 constexpr uint32_t ESP8266_SEND_TIMEOUT_MS = 7000;
 constexpr uint32_t ESP8266_TCP_TIMEOUT_MS = 12000;
 constexpr uint32_t ESP8266_TCP_QUERY_TIMEOUT_MS = 2500;
+constexpr uint32_t ESP8266_TCP_RECEIVE_TIMEOUT_MS = 6000;
 constexpr uint32_t ESP8266_TLS_HANDSHAKE_TIMEOUT_MS = 35000;
 constexpr uint32_t ESP8266_TLS_RESPONSE_TIMEOUT_MS = 18000;
 constexpr uint32_t ESP8266_SNTP_COMMAND_TIMEOUT_MS = 2500;
@@ -99,8 +100,10 @@ constexpr uint32_t ESP8266_SNTP_RETRY_DELAY_MS = 1000;
 constexpr uint8_t ESP8266_SNTP_MAX_ATTEMPTS = 8;
 constexpr uint32_t ESP8266_CLOCK_RESYNC_INTERVAL_MS = 6U * 60U * 60U * 1000U;
 constexpr uint32_t ESP8266_DRAIN_TIMEOUT_MS = 50;
+constexpr uint32_t ESP8266_PASSIVE_RECEIVE_RETRY_DELAY_MS = 20;
+constexpr uint8_t ESP8266_PASSIVE_RECEIVE_MAX_ERRORS = 3;
 constexpr size_t ESP8266_TCP_SEND_CHUNK_SIZE = 768;
-constexpr size_t ESP8266_TCP_RECEIVE_CHUNK_SIZE = 768;
+constexpr size_t ESP8266_TCP_RECEIVE_CHUNK_SIZE = 256;
 constexpr uint32_t ESP8266_COMMON_BAUDRATES[] = {115200, 9600, 57600, 38400, 19200};
 
 void append_tail(char *tail, size_t tail_size, size_t &tail_used, char value) {
@@ -181,24 +184,8 @@ bool response_is_google_unauthorized(const char *response) {
     return response_has_status(response, "HTTP/1.1 401");
 }
 
-const char *http_response_body(const char *response) {
-    if (response == nullptr) {
-        return nullptr;
-    }
-
-    const char *body = std::strstr(response, "\r\n\r\n");
-    if (body != nullptr) {
-        return body + 4;
-    }
-
-    body = std::strstr(response, "\n\n");
-    return body == nullptr ? nullptr : body + 2;
-}
-
 bool is_allowed_google_redirect_host(const char *host) {
-    return host != nullptr &&
-        (std::strcmp(host, "script.google.com") == 0 ||
-            std::strcmp(host, "script.googleusercontent.com") == 0);
+    return host != nullptr && std::strcmp(host, "script.googleusercontent.com") == 0;
 }
 
 bool wifi_query_reports_connection(const char *response, const char *expected_ssid) {
@@ -701,6 +688,14 @@ bool Esp8266At::synchronize_utc_clock() {
         }
     }
 
+    if (clock_synchronized_) {
+        last_clock_sync_ms_ = now_ms;
+        if (config::ENABLE_SERIAL_LOG) {
+            std::printf("Clock SNTP non disponibile: mantengo orologio corrente\n");
+        }
+        return true;
+    }
+
     time_t build_epoch = 0;
     if (build_timestamp_epoch(&build_epoch)) {
         timeval clock_time = {build_epoch, 0};
@@ -712,10 +707,6 @@ bool Esp8266At::synchronize_utc_clock() {
             last_clock_sync_ms_ = now_ms;
             return true;
         }
-    }
-
-    if (clock_synchronized_) {
-        return true;
     }
 
     last_status_ = Esp8266Status::clock_sync_failed;
@@ -826,47 +817,22 @@ bool Esp8266At::post_https_json_pico_tls(const char *host, const char *path, con
     if (response_is_redirect(response)) {
         static char redirect_host[80];
         static char redirect_path[768];
-        if (extract_redirect_location(response, redirect_host, sizeof(redirect_host), redirect_path, sizeof(redirect_path)) &&
-            is_allowed_google_redirect_host(redirect_host)) {
-            static char redirect_request[1000];
-            int redirect_request_length = std::snprintf(
-                redirect_request,
-                sizeof(redirect_request),
-                "GET %s HTTP/1.1\r\n"
-                "Host: %s\r\n"
-                "User-Agent: PICO-Hydro/1.0\r\n"
-                "Accept: application/json\r\n"
-                "Accept-Encoding: identity\r\n"
-                "Connection: close\r\n"
-                "\r\n",
+        if (extract_redirect_location(
+                response,
+                redirect_host,
+                sizeof(redirect_host),
                 redirect_path,
-                redirect_host
-            );
-
-            if (redirect_request_length > 0 && (size_t)redirect_request_length < sizeof(redirect_request)) {
-                static char redirect_response[2048];
-                redirect_response[0] = '\0';
-                if (send_pico_tls_http_request(
-                        redirect_host,
-                        redirect_request,
-                        (size_t)redirect_request_length,
-                        redirect_response,
-                        sizeof(redirect_response)) &&
-                    response_is_google_success(redirect_response)) {
-                    last_status_ = Esp8266Status::http_send_ok;
-                    return true;
-                }
-
-                if (config::ENABLE_SERIAL_LOG) {
-                    const char *body = http_response_body(redirect_response);
-                    printf(
-                        "Pico TLS Google redirect response body: %.180s\n",
-                        body == nullptr ? "<missing>" : body
-                    );
-                }
+                sizeof(redirect_path)) &&
+            is_allowed_google_redirect_host(redirect_host)) {
+            last_status_ = Esp8266Status::http_send_ok;
+            if (config::ENABLE_SERIAL_LOG) {
+                printf("Pico TLS Google POST accepted redirect host=\"%s\"\n", redirect_host);
             }
-        } else if (config::ENABLE_SERIAL_LOG) {
-            printf("Pico TLS redirect without parsable Location: %.180s\n", response);
+            return true;
+        }
+
+        if (config::ENABLE_SERIAL_LOG) {
+            printf("Pico TLS Google redirect non autorizzato: %.180s\n", response);
         }
     }
 
@@ -899,6 +865,9 @@ bool Esp8266At::send_pico_tls_http_request(
     bool connected = false;
     bool handshake_done = false;
     bool received_http = false;
+    bool preserve_transport_error = false;
+    Esp8266TransportError primary_transport_error = Esp8266TransportError::none;
+    uint32_t primary_transport_detail = 0;
     int ret = 0;
     TlsStreamContext stream = {
         this,
@@ -1075,6 +1044,12 @@ bool Esp8266At::send_pico_tls_http_request(
     }
 
 cleanup:
+    if (ret != 0 && last_transport_error_ != Esp8266TransportError::none) {
+        preserve_transport_error = true;
+        primary_transport_error = last_transport_error_;
+        primary_transport_detail = last_transport_detail_;
+    }
+
     if (config::ENABLE_SERIAL_LOG &&
         ret != 0 &&
         (last_status_ == Esp8266Status::ssl_failed ||
@@ -1105,6 +1080,10 @@ cleanup:
         close_connection();
     }
     (void)send_command_allow_error("AT+CIPRECVMODE=0", "OK", ESP8266_AT_TIMEOUT_MS);
+
+    if (preserve_transport_error) {
+        set_transport_error(primary_transport_error, primary_transport_detail);
+    }
 
     if (!received_http) {
         if (last_status_ != Esp8266Status::ssl_failed) {
@@ -1225,9 +1204,21 @@ int Esp8266At::tcp_recv_bytes(unsigned char *buffer, size_t length, uint64_t dea
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
 
+    uint8_t length_query_errors = 0;
+    uint8_t passive_receive_errors = 0;
+
     while (to_ms_since_boot(get_absolute_time()) < deadline_ms) {
         runtime::feed_watchdog();
-        size_t available = tcp_available_bytes();
+        size_t available = 0;
+        if (!tcp_available_bytes(&available)) {
+            if (++length_query_errors >= ESP8266_PASSIVE_RECEIVE_MAX_ERRORS) {
+                return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+            }
+            runtime::sleep_ms_guarded(ESP8266_PASSIVE_RECEIVE_RETRY_DELAY_MS);
+            continue;
+        }
+        length_query_errors = 0;
+
         if (available > 0) {
             size_t request_length = available;
             if (request_length > length) {
@@ -1239,11 +1230,20 @@ int Esp8266At::tcp_recv_bytes(unsigned char *buffer, size_t length, uint64_t dea
 
             size_t received = 0;
             if (!tcp_receive_passive(buffer, request_length, &received)) {
+                const bool data_disappeared =
+                    last_transport_error_ == Esp8266TransportError::receive_prefix_timeout &&
+                    last_transport_detail_ == 11U;
+                if (data_disappeared && ++passive_receive_errors < ESP8266_PASSIVE_RECEIVE_MAX_ERRORS) {
+                    runtime::sleep_ms_guarded(ESP8266_PASSIVE_RECEIVE_RETRY_DELAY_MS);
+                    continue;
+                }
                 return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
             }
             if (received > 0) {
+                set_transport_error(Esp8266TransportError::none, 0);
                 return (int)received;
             }
+            passive_receive_errors = 0;
         }
 
         runtime::feed_watchdog();
@@ -1253,19 +1253,25 @@ int Esp8266At::tcp_recv_bytes(unsigned char *buffer, size_t length, uint64_t dea
     return MBEDTLS_ERR_SSL_WANT_READ;
 }
 
-size_t Esp8266At::tcp_available_bytes() {
+bool Esp8266At::tcp_available_bytes(size_t *available) {
+    if (available == nullptr) {
+        set_transport_error(Esp8266TransportError::invalid_argument, 8);
+        return false;
+    }
+
+    *available = 0;
     char response[96];
     if (!send_command_capture("AT+CIPRECVLEN?", "OK", ESP8266_TCP_QUERY_TIMEOUT_MS, response, sizeof(response))) {
         set_transport_error(Esp8266TransportError::receive_length_query_failed, 0);
-        return 0;
+        return false;
     }
 
-    size_t available = parse_prefixed_size(response, "+CIPRECVLEN:");
-    if (available == 0) {
-        available = parse_prefixed_size(response, "+CIPRECVLEN,");
+    *available = parse_prefixed_size(response, "+CIPRECVLEN:");
+    if (*available == 0) {
+        *available = parse_prefixed_size(response, "+CIPRECVLEN,");
     }
 
-    return available;
+    return true;
 }
 
 bool Esp8266At::tcp_receive_passive(unsigned char *buffer, size_t max_length, size_t *received) {
@@ -1281,17 +1287,7 @@ bool Esp8266At::tcp_receive_passive(unsigned char *buffer, size_t max_length, si
         return false;
     }
 
-    if (tcp_receive_passive_with_command(command, buffer, max_length, received, 1)) {
-        return true;
-    }
-
-    command_length = std::snprintf(command, sizeof(command), "AT+CIPRECVDATA=0,%u", (unsigned)max_length);
-    if (command_length <= 0 || (size_t)command_length >= sizeof(command)) {
-        set_transport_error(Esp8266TransportError::invalid_argument, 7);
-        return false;
-    }
-
-    return tcp_receive_passive_with_command(command, buffer, max_length, received, 2);
+    return tcp_receive_passive_with_command(command, buffer, max_length, received, 1);
 }
 
 bool Esp8266At::tcp_receive_passive_with_command(
@@ -1310,7 +1306,7 @@ bool Esp8266At::tcp_receive_passive_with_command(
     drain_rx();
     write_command(command);
 
-    uint64_t deadline_ms = to_ms_since_boot(get_absolute_time()) + ESP8266_TCP_QUERY_TIMEOUT_MS;
+    uint64_t deadline_ms = to_ms_since_boot(get_absolute_time()) + ESP8266_TCP_RECEIVE_TIMEOUT_MS;
     char tail[24] = {0};
     size_t tail_used = 0;
 
@@ -1403,6 +1399,13 @@ bool Esp8266At::tcp_receive_passive_with_command(
     }
 
     if (copied != copy_length) {
+        if (config::ENABLE_SERIAL_LOG) {
+            printf(
+                "ESP8266 passive payload timeout expected=%u received=%u\n",
+                (unsigned)copy_length,
+                (unsigned)copied
+            );
+        }
         set_transport_error(Esp8266TransportError::receive_payload_timeout, command_variant * 100000U + (uint32_t)copy_length);
         return false;
     }
@@ -1422,7 +1425,7 @@ bool Esp8266At::tcp_receive_passive_with_command(
     *received = copied;
     tail[0] = '\0';
     tail_used = 0;
-    uint64_t ok_deadline_ms = to_ms_since_boot(get_absolute_time()) + ESP8266_TCP_QUERY_TIMEOUT_MS;
+    uint64_t ok_deadline_ms = to_ms_since_boot(get_absolute_time()) + ESP8266_TCP_RECEIVE_TIMEOUT_MS;
     while (to_ms_since_boot(get_absolute_time()) < ok_deadline_ms) {
         if (!uart_is_readable(uart_)) {
             runtime::feed_watchdog();

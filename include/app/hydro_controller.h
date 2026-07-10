@@ -14,6 +14,8 @@
 #include "sensors/veml7700_sensor.h"
 #include "ui/lcd_carousel.h"
 
+#include "pico/util/queue.h"
+
 #include <cstdint>
 
 namespace hydro {
@@ -53,7 +55,39 @@ private:
     float tds_compensation_temperature_c() const;
     void invalidate_water_temperature_cache(WaterTemperatureStatus status);
     void log_sample(bool level_present, bool flow_detected, float liters_per_minute) const;
-    bool send_remote_log(uint64_t now_ms, bool level_present);
+    struct RemoteLogJob {
+        uint64_t uptime_ms;
+        DhtReading dht;
+        WaterTemperatureReading water_temperatures[config::MAX_WATER_TEMPERATURE_SENSORS];
+        uint8_t water_temperature_count;
+        VemlReading veml;
+        TdsReading tds;
+        bool level_present;
+        bool flow_detected;
+        float liters_per_minute;
+        float total_liters;
+        uint32_t dht_failures;
+        uint32_t veml_failures;
+        uint32_t water_temperature_failures;
+        uint32_t wifi_failures;
+    };
+
+    struct RemoteLogResult {
+        uint64_t uptime_ms;
+        bool sent;
+        Esp8266Status status;
+        bool ssl_dns_ok;
+        bool ssl_sni_ok;
+        int16_t ssl_errno;
+        const char *transport_error_text;
+        uint32_t transport_detail;
+    };
+
+    void start_remote_log_worker();
+    static void remote_log_worker_entry();
+    [[noreturn]] void run_remote_log_worker();
+    bool enqueue_remote_log(uint64_t now_ms, bool level_present);
+    void process_remote_log_results(uint64_t now_ms);
     void expire_stale_readings(uint64_t now_ms);
     void blink_onboard_led_startup();
 
@@ -68,6 +102,8 @@ private:
     Ws2812Strip strip_;
     LcdCarousel carousel_;
     GoogleSheetsLogger google_logger_;
+    queue_t remote_log_jobs_;
+    queue_t remote_log_results_;
 
     DhtReading dht_ = {false, 0.0f, 0.0f};
     WaterTemperatureReading water_temperature_ = {false, false, WaterTemperatureStatus::not_read, 0.0f};
@@ -104,11 +140,15 @@ private:
     uint64_t next_remote_log_ms_ = config::GOOGLE_SHEETS_LOG_INTERVAL_MS;
     uint64_t next_wifi_reprobe_ms_ = config::ESP8266_REPROBE_INTERVAL_MS;
     uint32_t remote_log_failure_streak_ = 0;
+    bool remote_log_worker_started_ = false;
+    bool remote_log_job_pending_ = false;
     bool heartbeat_state_ = false;
     bool flow_detected_ = false;
     bool water_temperature_conversion_pending_ = false;
     uint64_t water_temperature_ready_ms_ = 0;
     uint8_t lcd_page_ = 0;
+
+    static HydroController *remote_log_worker_instance_;
 };
 
 }

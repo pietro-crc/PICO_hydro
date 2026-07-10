@@ -3,6 +3,7 @@
 #include "config/hardware_config.h"
 #include "hardware/gpio.h"
 #include "hardware/i2c.h"
+#include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "runtime/runtime_watchdog.h"
 
@@ -10,6 +11,9 @@
 
 namespace hydro {
 namespace {
+
+constexpr uint8_t REMOTE_LOG_MAX_PRE_HTTP_ATTEMPTS = 2;
+constexpr uint32_t REMOTE_LOG_PRE_HTTP_RETRY_DELAY_MS = 250;
 
 uint32_t remote_log_retry_interval_ms(uint32_t failure_streak) {
     uint32_t interval_ms = config::GOOGLE_SHEETS_LOG_INTERVAL_MS;
@@ -25,7 +29,15 @@ uint32_t remote_log_retry_interval_ms(uint32_t failure_streak) {
     return interval_ms;
 }
 
+uint64_t advance_periodic_deadline(uint64_t deadline_ms, uint64_t now_ms, uint32_t interval_ms) {
+    const uint64_t elapsed_ms = now_ms >= deadline_ms ? now_ms - deadline_ms : 0;
+    const uint64_t intervals = elapsed_ms / interval_ms + 1;
+    return deadline_ms + intervals * interval_ms;
 }
+
+}
+
+HydroController *HydroController::remote_log_worker_instance_ = nullptr;
 
 HydroController::HydroController()
     : lcd_(i2c0),
@@ -363,55 +375,147 @@ void HydroController::log_health(uint64_t now_ms, bool level_present) const {
     );
 }
 
-bool HydroController::send_remote_log(uint64_t now_ms, bool level_present) {
-    if (!config::ENABLE_GOOGLE_SHEETS_LOGGING || !wifi_.module_present) {
+void HydroController::start_remote_log_worker() {
+    if (remote_log_worker_started_ || !config::ENABLE_GOOGLE_SHEETS_LOGGING || !wifi_.module_present) {
+        return;
+    }
+
+    remote_log_worker_instance_ = this;
+    remote_log_worker_started_ = true;
+    multicore_launch_core1(&HydroController::remote_log_worker_entry);
+}
+
+void HydroController::remote_log_worker_entry() {
+    remote_log_worker_instance_->run_remote_log_worker();
+}
+
+[[noreturn]] void HydroController::run_remote_log_worker() {
+    while (true) {
+        RemoteLogJob job;
+        queue_remove_blocking(&remote_log_jobs_, &job);
+
+        HydroTelemetry telemetry = {
+            job.uptime_ms,
+            &job.dht,
+            job.water_temperatures,
+            job.water_temperature_count,
+            &job.veml,
+            &job.tds,
+            job.level_present,
+            job.flow_detected,
+            job.liters_per_minute,
+            job.total_liters,
+            job.dht_failures,
+            job.veml_failures,
+            job.water_temperature_failures,
+            job.wifi_failures
+        };
+
+        bool sent = false;
+        for (uint8_t attempt = 0; attempt < REMOTE_LOG_MAX_PRE_HTTP_ATTEMPTS; ++attempt) {
+            sent = google_logger_.send(telemetry);
+            if (sent) {
+                break;
+            }
+
+            const bool failed_before_http =
+                wifi_module_.last_status() == Esp8266Status::ssl_failed &&
+                !wifi_module_.last_ssl_sni_ok();
+            if (!failed_before_http || attempt + 1U >= REMOTE_LOG_MAX_PRE_HTTP_ATTEMPTS) {
+                break;
+            }
+
+            if (config::ENABLE_SERIAL_LOG) {
+                printf(
+                    "Google Sheets TLS retry uptime=%llus attempt=%u\n",
+                    (unsigned long long)(job.uptime_ms / 1000),
+                    (unsigned)(attempt + 2U)
+                );
+            }
+            runtime::sleep_ms_guarded(REMOTE_LOG_PRE_HTTP_RETRY_DELAY_MS);
+        }
+
+        const RemoteLogResult result = {
+            job.uptime_ms,
+            sent,
+            wifi_module_.last_status(),
+            wifi_module_.last_ssl_dns_ok(),
+            wifi_module_.last_ssl_sni_ok(),
+            wifi_module_.last_ssl_errno(),
+            wifi_module_.last_transport_error_text(),
+            wifi_module_.last_transport_detail()
+        };
+        queue_add_blocking(&remote_log_results_, &result);
+        runtime::feed_watchdog();
+    }
+}
+
+bool HydroController::enqueue_remote_log(uint64_t now_ms, bool level_present) {
+    if (!remote_log_worker_started_ || remote_log_job_pending_) {
         return false;
     }
 
-    HydroTelemetry telemetry = {
-        now_ms,
-        &dht_,
-        water_temperatures_,
-        water_temperature_count_,
-        &veml_,
-        &tds_,
-        level_present,
-        flow_detected_,
-        liters_per_minute_,
-        total_liters_,
-        dht_failures_,
-        veml_failures_,
-        water_temperature_failures_,
-        wifi_failures_
-    };
+    RemoteLogJob job = {};
+    job.uptime_ms = now_ms;
+    job.dht = dht_;
+    for (uint8_t i = 0; i < config::MAX_WATER_TEMPERATURE_SENSORS; ++i) {
+        job.water_temperatures[i] = water_temperatures_[i];
+    }
+    job.water_temperature_count = water_temperature_count_;
+    job.veml = veml_;
+    job.tds = tds_;
+    job.level_present = level_present;
+    job.flow_detected = flow_detected_;
+    job.liters_per_minute = liters_per_minute_;
+    job.total_liters = total_liters_;
+    job.dht_failures = dht_failures_;
+    job.veml_failures = veml_failures_;
+    job.water_temperature_failures = water_temperature_failures_;
+    job.wifi_failures = wifi_failures_;
 
-    if (google_logger_.send(telemetry)) {
-        wifi_.status = Esp8266Status::http_send_ok;
-        if (config::ENABLE_SERIAL_LOG) {
-            printf("Google Sheets log OK uptime=%llus\n", (unsigned long long)(now_ms / 1000));
+    if (!queue_try_add(&remote_log_jobs_, &job)) {
+        return false;
+    }
+
+    remote_log_job_pending_ = true;
+    return true;
+}
+
+void HydroController::process_remote_log_results(uint64_t now_ms) {
+    RemoteLogResult result;
+    while (queue_try_remove(&remote_log_results_, &result)) {
+        remote_log_job_pending_ = false;
+        wifi_.status = result.sent ? Esp8266Status::http_send_ok : result.status;
+        wifi_.ssl_dns_ok = result.ssl_dns_ok;
+        wifi_.ssl_sni_ok = result.ssl_sni_ok;
+        wifi_.ssl_errno = result.ssl_errno;
+
+        if (result.sent) {
+            remote_log_failure_streak_ = 0;
+            if (config::ENABLE_SERIAL_LOG) {
+                printf("Google Sheets log OK uptime=%llus\n", (unsigned long long)(result.uptime_ms / 1000));
+            }
+            continue;
         }
-    } else {
+
         wifi_failures_++;
-        wifi_.status = wifi_module_.last_status();
-        wifi_.ssl_dns_ok = wifi_module_.last_ssl_dns_ok();
-        wifi_.ssl_sni_ok = wifi_module_.last_ssl_sni_ok();
-        wifi_.ssl_errno = wifi_module_.last_ssl_errno();
+        if (remote_log_failure_streak_ < UINT32_MAX) {
+            remote_log_failure_streak_++;
+        }
+        next_remote_log_ms_ = now_ms + remote_log_retry_interval_ms(remote_log_failure_streak_);
         if (config::ENABLE_SERIAL_LOG) {
             printf(
                 "Google Sheets log ERR uptime=%llus status=%u tls[dns=%s sni=%s errno=%d] transport=%s detail=%lu\n",
-                (unsigned long long)(now_ms / 1000),
+                (unsigned long long)(result.uptime_ms / 1000),
                 (unsigned)wifi_.status,
                 wifi_.ssl_dns_ok ? "OK" : "NO",
                 wifi_.ssl_sni_ok ? "OK" : "NO",
                 (int)wifi_.ssl_errno,
-                wifi_module_.last_transport_error_text(),
-                (unsigned long)wifi_module_.last_transport_detail()
+                result.transport_error_text,
+                (unsigned long)result.transport_detail
             );
         }
-        return false;
     }
-
-    return true;
 }
 
 void HydroController::expire_stale_readings(uint64_t now_ms) {
@@ -436,6 +540,8 @@ void HydroController::expire_stale_readings(uint64_t now_ms) {
 
 void HydroController::init() {
     stdio_init_all();
+    queue_init(&remote_log_jobs_, sizeof(RemoteLogJob), 1);
+    queue_init(&remote_log_results_, sizeof(RemoteLogResult), 2);
     if (config::ENABLE_STARTUP_DELAY) {
         sleep_ms(2000);
     }
@@ -475,6 +581,7 @@ void HydroController::init() {
     StartupDiagnostics diagnostics = run_startup_diagnostics(lcd_ok, veml_ok);
     show_startup_diagnostics(diagnostics);
     log_startup(diagnostics);
+    start_remote_log_worker();
 
     show_startup_progress(100, "Loop avviato");
     sleep_ms(config::STARTUP_DIAGNOSTIC_SCREEN_MS);
@@ -503,12 +610,15 @@ void HydroController::init() {
         uint64_t now_ms = to_ms_since_boot(get_absolute_time());
         bool level_present = level_sensor_.water_present();
         expire_stale_readings(now_ms);
+        process_remote_log_results(now_ms);
 
         if (config::ENABLE_ESP8266_WIFI &&
+            !remote_log_worker_started_ &&
             !wifi_.module_present &&
             now_ms >= next_wifi_reprobe_ms_) {
             wifi_ = wifi_module_.run_startup_diagnostic();
             next_wifi_reprobe_ms_ = now_ms + config::ESP8266_REPROBE_INTERVAL_MS;
+            start_remote_log_worker();
             now_ms = to_ms_since_boot(get_absolute_time());
         }
 
@@ -639,25 +749,21 @@ void HydroController::init() {
         }
 
         if (now_ms >= next_remote_log_ms_) {
-            const bool remote_log_enabled = config::ENABLE_GOOGLE_SHEETS_LOGGING && wifi_.module_present;
-            if (remote_log_enabled) {
-                const bool sent = send_remote_log(now_ms, level_present);
-                const uint64_t completed_ms = to_ms_since_boot(get_absolute_time());
-
-                if (sent) {
-                    remote_log_failure_streak_ = 0;
-                    next_remote_log_ms_ = completed_ms + config::GOOGLE_SHEETS_LOG_INTERVAL_MS;
-                } else {
-                    if (remote_log_failure_streak_ < UINT32_MAX) {
-                        remote_log_failure_streak_++;
-                    }
-                    next_remote_log_ms_ = completed_ms + remote_log_retry_interval_ms(remote_log_failure_streak_);
+            if (config::ENABLE_GOOGLE_SHEETS_LOGGING && remote_log_worker_started_) {
+                if (!remote_log_job_pending_ && enqueue_remote_log(now_ms, level_present)) {
+                    next_remote_log_ms_ = advance_periodic_deadline(
+                        next_remote_log_ms_,
+                        now_ms,
+                        config::GOOGLE_SHEETS_LOG_INTERVAL_MS
+                    );
                 }
             } else {
-                next_remote_log_ms_ = now_ms + config::GOOGLE_SHEETS_LOG_INTERVAL_MS;
+                next_remote_log_ms_ = advance_periodic_deadline(
+                    next_remote_log_ms_,
+                    now_ms,
+                    config::GOOGLE_SHEETS_LOG_INTERVAL_MS
+                );
             }
-
-            now_ms = to_ms_since_boot(get_absolute_time());
         }
 
         if (lcd_.available() && now_ms >= next_lcd_update_ms) {

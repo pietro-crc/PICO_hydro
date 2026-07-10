@@ -71,6 +71,7 @@ target_compile_definitions(PICO_hydro PRIVATE
 # hardware_adc serve per leggere il sensore TDS su GP26 / ADC0.
 target_link_libraries(PICO_hydro
         pico_stdlib
+        pico_multicore
         pico_mbedtls
         hardware_adc
         hardware_i2c

@@ -82,7 +82,7 @@ private:
     bool open_tcp(const char *host, uint16_t port);
     bool tcp_send_bytes(const unsigned char *data, size_t length);
     int tcp_recv_bytes(unsigned char *buffer, size_t length, uint64_t deadline_ms);
-    size_t tcp_available_bytes();
+    bool tcp_available_bytes(size_t *available);
     bool tcp_receive_passive(unsigned char *buffer, size_t max_length, size_t *received);
     bool tcp_receive_passive_with_command(const char *command, unsigned char *buffer, size_t max_length, size_t *received, uint32_t command_variant);
     bool send_command(const char *command, const char *expected, uint32_t timeout_ms);

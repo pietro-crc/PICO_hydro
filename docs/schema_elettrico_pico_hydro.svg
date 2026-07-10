@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1273" viewBox="0 0 1800 1273">
+  <defs>
+    <style>
+      .bg{fill:#f7f9fc}.panel{fill:#fff;stroke:#24364b;stroke-width:2}.pico{fill:#e8f2ff;stroke:#1261a0;stroke-width:4}
+      .power{stroke:#d9342b;stroke-width:4;fill:none}.v33{stroke:#f28c18;stroke-width:4;fill:none}.gnd{stroke:#222;stroke-width:4;fill:none}
+      .signal{stroke:#1769aa;stroke-width:3;fill:none}.analog{stroke:#7b3fb4;stroke-width:3;fill:none}.load{stroke:#16804a;stroke-width:4;fill:none}
+      .dash{stroke-dasharray:9 7}.title{font:700 32px Arial;fill:#162638}.sub{font:700 19px Arial;fill:#162638}
+      .txt{font:16px Arial;fill:#162638}.small{font:14px Arial;fill:#24364b}.pin{font:700 15px monospace;fill:#0c4f84}
+      .warn{fill:#fff3cd;stroke:#b07a00;stroke-width:2}.danger{fill:#fde8e8;stroke:#b42318;stroke-width:2}.safe{fill:#eaf7ef;stroke:#16804a;stroke-width:2}
+      .dot{fill:#162638}.label{fill:#fff;stroke:#c4cfdb;stroke-width:1}.rail{font:700 15px Arial}
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#1769aa"/></marker>
+  </defs>
+  <rect class="bg" width="1800" height="1273"/>
+  <text x="55" y="52" class="title">PICO HYDRO — schema di cablaggio per saldatura</text>
+  <text x="55" y="80" class="txt">Raspberry Pi Pico RP2040 · firmware PICO Hydro 1.0 · revisione 2026-07-10</text>
+
+  <!-- POWER -->
+  <rect x="45" y="105" width="1710" height="175" rx="14" class="panel"/>
+  <text x="65" y="136" class="sub">ALIMENTAZIONE E MASSE</text>
+  <rect x="65" y="158" width="215" height="88" rx="10" class="safe"/>
+  <text x="82" y="185" class="sub">Alimentatore 5 V</text><text x="82" y="210" class="txt">regolato, corrente adeguata</text><text x="82" y="232" class="small">F1 sul positivo, valore da carico</text>
+  <path d="M280 180 H1665" class="power"/><text x="1510" y="171" class="rail" fill="#d9342b">+5V_ELETTRONICA</text>
+  <path d="M280 230 H1665" class="gnd"/><text x="1580" y="252" class="rail">GND COMUNE</text>
+  <rect x="345" y="146" width="245" height="104" rx="10" class="panel"/>
+  <text x="365" y="174" class="sub">Regolatore ESP8266</text><text x="365" y="198" class="txt">5 V → 3,3 V / ≥500 mA</text><text x="365" y="220" class="small">100 µF + 100 nF vicino ESP</text>
+  <path d="M345 180 H320" class="power"/><path d="M590 198 H730" class="v33"/><text x="610" y="190" class="rail" fill="#f28c18">+3V3_ESP</text>
+  <rect x="785" y="146" width="330" height="104" rx="10" class="warn"/>
+  <text x="805" y="174" class="sub">Pico: ingresso VSYS pin 39</text><text x="805" y="198" class="txt">da +5 V tramite Schottky consigliato</text><text x="805" y="222" class="small">USB resta per programmazione; non unire VBUS e 5 V esterni</text>
+  <path d="M785 180 H750" class="power"/>
+  <rect x="1200" y="146" width="270" height="104" rx="10" class="panel"/>
+  <text x="1220" y="174" class="sub">3V3 Pico · pin 36</text><text x="1220" y="198" class="txt">solo sensori/logica leggera</text><text x="1220" y="222" class="small">NON alimentare ESP o relè</text>
+
+  <!-- PICO -->
+  <rect x="690" y="320" width="420" height="735" rx="24" class="pico"/>
+  <text x="790" y="362" class="title">RASPBERRY PI PICO</text>
+  <text x="842" y="392" class="txt">USB in alto · vista componenti</text>
+  <line x1="900" y1="415" x2="900" y2="1028" stroke="#9bb9d4" stroke-width="2"/>
+
+  <!-- left pins -->
+  <g class="pin">
+    <text x="710" y="455">1  GP0  LCD SDA</text><text x="710" y="493">2  GP1  LCD SCL</text>
+    <text x="710" y="531">4  GP2  LIVELLO</text><text x="710" y="569">5  GP3  WS2812</text>
+    <text x="710" y="607">6  GP4  FLUSSO</text><text x="710" y="645">7  GP5  DHT11</text>
+    <text x="710" y="683">9  GP6  VEML SDA</text><text x="710" y="721">10 GP7  VEML SCL</text>
+    <text x="710" y="759">11 GP8  DS18B20</text><text x="710" y="797">16 GP12 ESP RX</text>
+    <text x="710" y="835">17 GP13 ESP TX</text><text x="710" y="873">20 GP15 RELÈ</text>
+    <text x="710" y="911">31 GP26 TDS ADC0</text><text x="710" y="949">33 AGND analogica</text>
+    <text x="710" y="987">36 3V3 OUT</text><text x="710" y="1025">39 VSYS</text>
+  </g>
+  <g class="small"><text x="925" y="455">Pin GND utili: 3, 8, 13, 18, 23, 28, 33, 38</text><text x="925" y="482">GP25: LED integrato, nessun filo</text><text x="925" y="515">GPIO liberi: GP9–GP11, GP14, GP16–GP22</text><text x="925" y="548">Tutti i GPIO: logica 3,3 V</text><text x="925" y="581">GP26 ADC: massimo 3,3 V</text></g>
+
+  <!-- LEFT MODULES -->
+  <rect x="45" y="320" width="565" height="156" rx="14" class="panel"/>
+  <text x="65" y="350" class="sub">LCD 1602 + backpack PCF8574 (0x27)</text>
+  <text x="65" y="377" class="txt">GP0 SDA ↔ LV1 · GP1 SCL ↔ LV2</text><text x="65" y="401" class="txt">Level shifter I²C BSS138: LV=3V3, HV=5V</text>
+  <text x="65" y="425" class="small">LCD VCC=5V, GND comune; obbligatorio se pull-up backpack vanno a 5V</text>
+  <path d="M610 385 H690" class="signal"/><path d="M610 415 H690" class="signal"/>
+
+  <rect x="45" y="500" width="565" height="106" rx="14" class="panel"/>
+  <text x="65" y="530" class="sub">Sensore livello digitale</text><text x="65" y="556" class="txt">DO → GP2 · VCC secondo modulo · GND comune</text><text x="65" y="580" class="small">DO deve essere 0–3,3 V; se è 5 V usare divisore 10 kΩ / 20 kΩ</text>
+  <path d="M610 550 H690" class="signal"/>
+
+  <rect x="45" y="630" width="565" height="130" rx="14" class="panel"/>
+  <text x="65" y="660" class="sub">Striscia WS2812 · 8 LED</text><text x="65" y="686" class="txt">GP3 → 74AHCT125 → 330 Ω → DIN</text><text x="65" y="710" class="txt">VCC=5V · GND comune · 1000 µF tra 5V/GND</text><text x="65" y="736" class="small">74AHCT125: VCC=5V, /OE=GND; ingresso 3,3 V compatibile</text>
+  <path d="M610 690 H690" class="signal"/>
+
+  <rect x="45" y="784" width="565" height="112" rx="14" class="panel"/>
+  <text x="65" y="814" class="sub">Flussometro 5 V</text><text x="65" y="840" class="txt">OUT → 10 kΩ → GP4; GP4 → 20 kΩ → GND</text><text x="65" y="864" class="small">Se uscita open-collector: preferibile pull-up 10 kΩ direttamente a 3V3</text>
+  <path d="M610 840 H690" class="signal"/>
+
+  <rect x="45" y="920" width="565" height="135" rx="14" class="panel"/>
+  <text x="65" y="950" class="sub">DHT11 + 2 × DS18B20</text><text x="65" y="976" class="txt">DHT DATA → GP5, pull-up 4,7 kΩ a 3V3</text><text x="65" y="1000" class="txt">DS DATA comune → GP8, pull-up 4,7 kΩ a 3V3</text><text x="65" y="1025" class="small">Sensori a 3V3, GND comune; DS18B20 in bus, non in parasite power</text>
+  <path d="M610 970 H690" class="signal"/><path d="M610 1010 H690" class="signal"/>
+
+  <!-- RIGHT MODULES -->
+  <rect x="1190" y="320" width="565" height="150" rx="14" class="panel"/>
+  <text x="1210" y="350" class="sub">VEML7700 I²C (0x10)</text><text x="1210" y="378" class="txt">GP6 → SDA · GP7 → SCL · VCC=3V3 · GND</text><text x="1210" y="404" class="small">Pull-up SDA/SCL a 3V3 (sul breakout oppure 4,7 kΩ esterni)</text>
+  <path d="M1110 385 H1190" class="signal"/><path d="M1110 415 H1190" class="signal"/>
+
+  <rect x="1190" y="495" width="565" height="165" rx="14" class="panel"/>
+  <text x="1210" y="525" class="sub">ESP8266 AT · UART0 · 115200 baud</text><text x="1210" y="552" class="txt">GP12 TX → ESP RX · GP13 RX ← ESP TX</text><text x="1210" y="578" class="txt">VCC + EN/CH_PD → +3V3_ESP · GND comune</text><text x="1210" y="604" class="small">GPIO0 e GPIO2 HIGH al boot; RST HIGH. Mai 5 V sui pin ESP.</text><text x="1210" y="630" class="small">Regolatore dedicato ≥500 mA + condensatori vicini al modulo.</text>
+  <path d="M1110 545 H1190" class="signal" marker-end="url(#arrow)"/><path d="M1190 585 H1110" class="signal" marker-end="url(#arrow)"/>
+
+  <rect x="1190" y="685" width="565" height="190" rx="14" class="panel"/>
+  <text x="1210" y="715" class="sub">Modulo relè 5 V tramite NPN (GP15 attivo HIGH)</text>
+  <text x="1210" y="743" class="txt">GP15 → 1 kΩ → base Q1 (BC337 / 2N2222)</text><text x="1210" y="769" class="txt">Base → 10 kΩ → GND · emettitore → GND</text><text x="1210" y="795" class="txt">Collettore → IN relè · VCC relè=5V · GND comune</text><text x="1210" y="821" class="small">Contatti: alimentazione pompa → fusibile → COM; NO → pompa</text><text x="1210" y="847" class="small">Pompa DC: diodo/TVS sul motore. Non portare rete 230 V sulla scheda.</text>
+  <path d="M1110 760 H1190" class="signal"/>
+
+  <rect x="1190" y="900" width="565" height="155" rx="14" class="panel"/>
+  <text x="1210" y="930" class="sub">Modulo TDS analogico</text><text x="1210" y="956" class="txt">AO → 1 kΩ → GP26/ADC0 · 100 nF GP26→AGND</text><text x="1210" y="982" class="txt">GND modulo → AGND pin 33; VCC secondo modulo</text><text x="1210" y="1008" class="small">Misurare AO: deve restare 0–3,3 V in ogni condizione.</text><text x="1210" y="1032" class="small">Tenere cavo analogico lontano da relè, pompa e WS2812.</text>
+  <path d="M1110 970 H1190" class="analog"/>
+
+  <!-- FOOTER -->
+  <rect x="45" y="1085" width="1710" height="145" rx="14" class="danger"/>
+  <text x="65" y="1118" class="sub">REGOLE DI MONTAGGIO</text>
+  <text x="65" y="1146" class="txt">1. Tutte le masse logiche unite in un solo punto vicino all’alimentatore; ritorni di pompa, relè e LED separati dai sensori fino al punto stella.</text>
+  <text x="65" y="1173" class="txt">2. Nessun GPIO o ADC del Pico deve ricevere 5 V. Verificare con multimetro prima di inserire il Pico.</text>
+  <text x="65" y="1200" class="txt">3. Connettori polarizzati e serigrafati: 5V / 3V3 / GND / SIG. Prova continuità e assenza corti prima dell’accensione.</text>
+  <text x="65" y="1222" class="small">Linee: rosso=5 V · arancio=3,3 V · nero=GND · blu=digitale · viola=analogico · verde=potenza pompa</text>
+</svg>
